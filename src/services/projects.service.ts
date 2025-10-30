@@ -1,6 +1,7 @@
 import { ObjectId, WithId } from 'mongodb';
+import { randomBytes, randomUUID } from 'crypto';
 import { getDatabase } from '../database/connection';
-import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser } from '../types/project.types';
+import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
 
 const COLLECTION_NAME = 'projects';
@@ -34,11 +35,9 @@ export async function createProjectIndexes(): Promise<void> {
     try {
         const collection = getProjectsCollection();
 
-        // Create unique index on projectId
         await collection.createIndex({ projectId: 1 }, { unique: true });
-
-        // Create index on users.id for faster lookups
         await collection.createIndex({ 'users.id': 1 });
+        await collection.createIndex({ 'apiKeys.key': 1 });
 
         console.log('✅ Project indexes created');
     } catch (error) {
@@ -221,5 +220,120 @@ export async function removeUserFromAllProjects(userId: ObjectId): Promise<void>
         { 'users.id': userId },
         { $pull: { users: { id: userId } } }
     );
+}
+
+/**
+ * Generate a random API key string
+ * @returns string
+ */
+function generateApiKey(length: number = 40): string {
+    let apiKey = '';
+    while (apiKey.length < length) {
+        const bytes = randomBytes(32);
+        const base64 = bytes.toString('base64').replace(/[+/=]/g, '');
+        apiKey += base64;
+    }
+
+    return apiKey.substring(0, length);
+}
+
+/**
+ * Create a new API key for a project
+ * @param projectId - The unique projectId identifier
+ * @returns Created API key or null if project not found
+ */
+export async function createProjectApiKey(projectId: string): Promise<ProjectApiKey | null> {
+    const collection = getProjectsCollection();
+
+    const apiKeyString = generateApiKey();
+    const apiKeyId = randomUUID();
+    const now = new Date();
+
+    const newApiKey: ProjectApiKey = {
+        id: apiKeyId,
+        key: apiKeyString,
+        createdAt: now,
+        constraints: {},
+    };
+
+    const result = await collection.findOneAndUpdate(
+        { projectId },
+        {
+            $push: { apiKeys: newApiKey },
+            $set: { updatedAt: now },
+        },
+        { returnDocument: 'after' }
+    );
+
+    if (!result) {
+        return null;
+    }
+
+    // Find the newly created API key in the updated project
+    const project = toProject(result);
+    if (!project || !project.apiKeys) {
+        return null;
+    }
+
+    const createdApiKey = project.apiKeys.find(ak => ak.id === apiKeyId);
+    return createdApiKey || null;
+}
+
+/**
+ * Get all API keys for a project
+ * @param projectId - The unique projectId identifier
+ * @returns Array of API keys or null if project not found
+ */
+export async function getProjectApiKeys(projectId: string): Promise<ProjectApiKey[] | null> {
+    const project = await findProjectByProjectId(projectId);
+    if (!project) {
+        return null;
+    }
+    return project.apiKeys || [];
+}
+
+/**
+ * Delete an API key from a project
+ * @param projectId - The unique projectId identifier
+ * @param apiKeyId - The unique identifier of the API key to delete
+ * @returns true if API key was deleted, false otherwise
+ */
+export async function deleteProjectApiKey(projectId: string, apiKeyId: string): Promise<boolean> {
+    const collection = getProjectsCollection();
+
+    // First check if the project exists and if the API key exists
+    const project = await findProjectByProjectId(projectId);
+    if (!project) {
+        return false;
+    }
+
+    const apiKeyExists = project.apiKeys?.some(ak => ak.id === apiKeyId);
+    if (!apiKeyExists) {
+        return false;
+    }
+
+    const now = new Date();
+    const result = await collection.findOneAndUpdate(
+        { projectId },
+        {
+            $pull: { apiKeys: { id: apiKeyId } },
+            $set: { updatedAt: now },
+        },
+        { returnDocument: 'after' }
+    );
+
+    return result !== null;
+}
+
+/**
+ * Find a project by API key
+ * Used for API key authentication
+ * @param apiKey - The API key string to search for
+ * @returns Project document or null
+ */
+export async function findProjectByApiKey(apiKey: string): Promise<Project | null> {
+    const collection = getProjectsCollection();
+    const project = await collection.findOne({ 'apiKeys.key': apiKey });
+    return toProject(project);
 }
 

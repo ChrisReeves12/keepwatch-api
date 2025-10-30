@@ -9,14 +9,25 @@ export interface ProjectUser {
 }
 
 /**
+ * API key for a project
+ */
+export interface ProjectApiKey {
+    id: string;
+    key: string;
+    createdAt: Date;
+    constraints: Record<string, any>; // Configuration that limits API key usage
+}
+
+/**
  * Project interface representing a project document in MongoDB
  */
 export interface Project {
     _id?: ObjectId | string;
     name: string;
     description?: string;
-    projectId: string; // Unique machine-readable identifier
+    projectId: string;
     users: ProjectUser[];
+    apiKeys?: ProjectApiKey[];
     createdAt: Date;
     updatedAt: Date;
 }

@@ -18,10 +18,13 @@ describe('Log Endpoints Integration Tests', () => {
     let otherProject: any;
 
     beforeEach(async () => {
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(7);
+
         // Create test user
         testUser = await createTestUser({
-            name: 'Test User',
-            email: `test-${Date.now()}@example.com`,
+            name: `Test User ${timestamp} ${randomSuffix}`,
+            email: `test-${timestamp}-${randomSuffix}@example.com`,
             password: 'password123',
         });
 
@@ -32,7 +35,7 @@ describe('Log Endpoints Integration Tests', () => {
         const userObjectId = typeof testUser._id === 'string' ? new ObjectId(testUser._id) : testUser._id;
         testProject = await createTestProject(
             {
-                name: 'Test Project',
+                name: `Test Project ${timestamp} ${randomSuffix}`,
                 description: 'A test project',
             },
             userObjectId
@@ -40,8 +43,8 @@ describe('Log Endpoints Integration Tests', () => {
 
         // Create another user for access control tests
         otherUser = await createTestUser({
-            name: 'Other User',
-            email: `other-${Date.now()}@example.com`,
+            name: `Other User ${timestamp} ${randomSuffix}`,
+            email: `other-${timestamp}-${randomSuffix}@example.com`,
             password: 'password123',
         });
 
@@ -51,7 +54,7 @@ describe('Log Endpoints Integration Tests', () => {
         const otherUserObjectId = typeof otherUser._id === 'string' ? new ObjectId(otherUser._id) : otherUser._id;
         otherProject = await createTestProject(
             {
-                name: 'Other Project',
+                name: `Other Project ${timestamp} ${randomSuffix}`,
                 description: 'Another test project',
             },
             otherUserObjectId
@@ -390,10 +393,12 @@ describe('Log Endpoints Integration Tests', () => {
 
         it('should handle empty results', async () => {
             // Create a new project with no logs
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(7);
             const userObjectId = typeof testUser._id === 'string' ? new ObjectId(testUser._id) : testUser._id;
             const emptyProject = await createTestProject(
                 {
-                    name: 'Empty Project',
+                    name: `Empty Project ${timestamp} ${randomSuffix}`,
                     description: 'A project with no logs',
                 },
                 userObjectId

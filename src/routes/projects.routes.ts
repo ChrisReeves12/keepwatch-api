@@ -11,5 +11,10 @@ router.get('/:projectId', authenticate, ProjectsController.getProjectByProjectId
 router.put('/:projectId', authenticate, ProjectsController.updateProject);
 router.delete('/:projectId', authenticate, ProjectsController.deleteProject);
 
+// API key routes
+router.post('/:projectId/api-keys', authenticate, ProjectsController.createProjectApiKey);
+router.get('/:projectId/api-keys', authenticate, ProjectsController.getProjectApiKeys);
+router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController.deleteProjectApiKey);
+
 export default router;
 
