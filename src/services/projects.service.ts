@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import { getDatabase } from '../database/connection';
 import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
+import { getCache, setCache } from './redis.service';
 
 const COLLECTION_NAME = 'projects';
 
@@ -332,9 +333,21 @@ export async function deleteProjectApiKey(projectId: string, apiKeyId: string): 
  * @returns Project document or null
  */
 export async function findProjectByApiKey(apiKey: string): Promise<Project | null> {
+    const cacheKey = `project:api-key:${apiKey}`;
+    const cachedProject = await getCache<Project>(cacheKey);
+    if (cachedProject) {
+        return cachedProject;
+    }
+
     const collection = getProjectsCollection();
     const project = await collection.findOne({ 'apiKeys.key': apiKey });
-    return toProject(project);
+    const result = toProject(project);
+
+    if (result) {
+        await setCache(cacheKey, result, 300); // 5-minute cache
+    }
+
+    return result;
 }
 
 /**

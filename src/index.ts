@@ -6,6 +6,7 @@ import { createUserIndexes } from './services/users.service';
 import { createProjectIndexes } from './services/projects.service';
 import { createLogIndexes } from './services/logs.service';
 import { createLogsTypesenseCollection } from './services/typesense.service';
+import { connectToRedis, closeRedisConnection, isCachingEnabled } from './services/redis.service';
 
 // Load environment variables
 dotenv.config();
@@ -32,6 +33,15 @@ async function startServer() {
         // Initialize Typesense collections
         await createLogsTypesenseCollection();
 
+        // Connect to Redis if caching is enabled
+        if (isCachingEnabled()) {
+            try {
+                await connectToRedis();
+            } catch (error) {
+                console.warn('⚠️  Redis connection failed, continuing without cache:', error);
+            }
+        }
+
         app.listen(PORT, () => {
             console.log(`API is running on port ${PORT}`);
             console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -46,12 +56,14 @@ async function startServer() {
 process.on('SIGINT', async () => {
     console.log('\nShutting down gracefully...');
     await closeDatabaseConnection();
+    await closeRedisConnection();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     console.log('\nShutting down gracefully...');
     await closeDatabaseConnection();
+    await closeRedisConnection();
     process.exit(0);
 });
 
