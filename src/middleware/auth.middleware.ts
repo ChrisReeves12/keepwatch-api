@@ -12,9 +12,16 @@ declare global {
 /**
  * Authentication middleware to verify JWT token
  * Adds user payload to request if token is valid
+ * Skips JWT validation if API key authentication was already successful
  */
 export const authenticate = (req: Request, res: Response, next: NextFunction): void => {
     try {
+        // If already authenticated via API key, skip JWT validation
+        if ((req as any).apiKeyProject) {
+            next();
+            return;
+        }
+
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {

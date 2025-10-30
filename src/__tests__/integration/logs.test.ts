@@ -62,7 +62,26 @@ describe('Log Endpoints Integration Tests', () => {
     });
 
     describe('POST /api/v1/logs', () => {
-        it('should successfully create log with valid data', async () => {
+        let testApiKey: string;
+        let otherProjectApiKey: string;
+
+        beforeEach(async () => {
+            // Create API keys for both projects
+            const apiKeyResponse1 = await request(app)
+                .post(`/api/v1/projects/${testProject.projectId}/api-keys`)
+                .set('Authorization', createAuthHeader(testUserToken))
+                .expect(201);
+
+            const apiKeyResponse2 = await request(app)
+                .post(`/api/v1/projects/${otherProject.projectId}/api-keys`)
+                .set('Authorization', createAuthHeader(otherUserToken))
+                .expect(201);
+
+            testApiKey = apiKeyResponse1.body.apiKey.key;
+            otherProjectApiKey = apiKeyResponse2.body.apiKey.key;
+        });
+
+        it('should successfully create log with valid API key', async () => {
             const logData = {
                 level: 'error',
                 environment: 'production',
@@ -73,7 +92,7 @@ describe('Log Endpoints Integration Tests', () => {
 
             const response = await request(app)
                 .post('/api/v1/logs')
-                .set('Authorization', createAuthHeader(testUserToken))
+                .set('X-API-Key', testApiKey)
                 .send(logData)
                 .expect(201);
 
@@ -86,7 +105,7 @@ describe('Log Endpoints Integration Tests', () => {
             expect(response.body.log).toHaveProperty('timestampMS', logData.timestampMS);
         });
 
-        it('should return 401 without authentication', async () => {
+        it('should return 401 without API key', async () => {
             const logData = {
                 level: 'error',
                 environment: 'production',
@@ -100,7 +119,7 @@ describe('Log Endpoints Integration Tests', () => {
                 .send(logData)
                 .expect(401);
 
-            expect(response.body).toHaveProperty('error');
+            expect(response.body).toHaveProperty('error', 'API key authentication required');
         });
 
         it('should return 400 with missing required fields', async () => {
@@ -111,7 +130,7 @@ describe('Log Endpoints Integration Tests', () => {
 
             const response = await request(app)
                 .post('/api/v1/logs')
-                .set('Authorization', createAuthHeader(testUserToken))
+                .set('X-API-Key', testApiKey)
                 .send(logData)
                 .expect(400);
 
@@ -119,41 +138,40 @@ describe('Log Endpoints Integration Tests', () => {
             expect(response.body.error).toContain('Missing required fields');
         });
 
-        it('should return 404 when project does not exist', async () => {
+        it('should return 403 when API key project does not match request projectId', async () => {
             const logData = {
                 level: 'error',
                 environment: 'production',
-                projectId: new ObjectId().toString(), // Non-existent project ID
+                projectId: otherProject.projectId, // Different project
                 message: 'Test error message',
                 timestampMS: Date.now(),
             };
 
             const response = await request(app)
                 .post('/api/v1/logs')
-                .set('Authorization', createAuthHeader(testUserToken))
-                .send(logData)
-                .expect(404);
-
-            expect(response.body).toHaveProperty('error', 'Project not found');
-        });
-
-        it('should return 403 when user does not have project access', async () => {
-            const logData = {
-                level: 'error',
-                environment: 'production',
-                projectId: otherProject.projectId, // Project owned by other user
-                message: 'Test error message',
-                timestampMS: Date.now(),
-            };
-
-            const response = await request(app)
-                .post('/api/v1/logs')
-                .set('Authorization', createAuthHeader(testUserToken))
+                .set('X-API-Key', testApiKey) // API key for testProject
                 .send(logData)
                 .expect(403);
 
-            expect(response.body).toHaveProperty('error');
-            expect(response.body.error).toContain('do not have access');
+            expect(response.body).toHaveProperty('error', 'Forbidden: API key project does not match the requested project');
+        });
+
+        it('should return 401 with invalid API key', async () => {
+            const logData = {
+                level: 'error',
+                environment: 'production',
+                projectId: testProject.projectId,
+                message: 'Test error message',
+                timestampMS: Date.now(),
+            };
+
+            const response = await request(app)
+                .post('/api/v1/logs')
+                .set('X-API-Key', 'invalid-api-key-12345')
+                .send(logData)
+                .expect(401);
+
+            expect(response.body).toHaveProperty('error', 'Invalid API key');
         });
 
         it('should successfully create log with optional fields (stackTrace, details)', async () => {
@@ -174,7 +192,7 @@ describe('Log Endpoints Integration Tests', () => {
 
             const response = await request(app)
                 .post('/api/v1/logs')
-                .set('Authorization', createAuthHeader(testUserToken))
+                .set('X-API-Key', testApiKey)
                 .send(logData)
                 .expect(201);
 

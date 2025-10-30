@@ -8,13 +8,14 @@ import { CreateLogInput } from '../types/log.types';
 /**
  * Create a new log
  * POST /api/v1/logs
- * Protected: Requires authentication
+ * Protected: Requires API key authentication
  */
 export const createLog = async (req: Request, res: Response): Promise<void> => {
     try {
-        if (!req.user) {
+        // Verify API key authentication
+        if (!req.apiKeyProject) {
             res.status(401).json({
-                error: 'Authentication required',
+                error: 'API key authentication required',
             });
             return;
         }
@@ -29,32 +30,13 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Verify project exists and user has access
-        const project = await ProjectsService.findProjectByProjectId(logData.projectId);
-        if (!project) {
-            res.status(404).json({
-                error: 'Project not found',
-            });
-            return;
-        }
+        // Use the project from the API key
+        const project = req.apiKeyProject;
 
-        // Check if user has access to this project
-        const user = await UsersService.findUserByUserId(req.user.userId);
-        if (!user || !user._id) {
-            res.status(404).json({
-                error: 'User not found',
-            });
-            return;
-        }
-
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const hasAccess = project.users.some(pu => pu.id.toString() === userObjectId.toString());
-        if (!hasAccess) {
+        // Verify the projectId in the request matches the API key's project
+        if (logData.projectId !== project.projectId) {
             res.status(403).json({
-                error: 'Forbidden: You do not have access to this project',
+                error: 'Forbidden: API key project does not match the requested project',
             });
             return;
         }
@@ -81,10 +63,11 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
 /**
  * Get logs for a project
  * GET /api/v1/logs/:projectId
- * Protected: Requires authentication, user must be part of the project
+ * Protected: Requires JWT authentication
  */
 export const getLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
     try {
+        // Verify JWT authentication
         if (!req.user) {
             res.status(401).json({
                 error: 'Authentication required',
