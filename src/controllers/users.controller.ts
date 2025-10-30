@@ -45,13 +45,20 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
 };
 
 /**
- * Get a user by userId
- * GET /api/v1/users/:userId
+ * Get the current authenticated user
+ * GET /api/v1/users/me
+ * Protected: Requires authentication
  */
-export const getUserByUserId = async (req: Request, res: Response): Promise<void> => {
+export const getCurrentUser = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { userId } = req.params;
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
 
+        const userId = req.user.userId;
         const user = await UsersService.findUserByUserId(userId);
 
         if (!user) {
@@ -77,39 +84,20 @@ export const getUserByUserId = async (req: Request, res: Response): Promise<void
 };
 
 /**
- * Get all users
- * GET /api/v1/users
+ * Update the current authenticated user
+ * PUT /api/v1/users/me
+ * Protected: Requires authentication
  */
-export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
+export const updateCurrentUser = async (req: Request, res: Response): Promise<void> => {
     try {
-        const limit = parseInt(req.query.limit as string) || 100;
-        const skip = parseInt(req.query.skip as string) || 0;
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
 
-        const users = await UsersService.getAllUsers(limit, skip);
-
-        // Remove passwords from response
-        const usersResponse = users.map(({ password, ...user }) => user);
-
-        res.json({
-            users: usersResponse,
-            count: usersResponse.length,
-        });
-    } catch (error: any) {
-        console.error('Error fetching users:', error);
-        res.status(500).json({
-            error: 'Failed to fetch users',
-            details: error.message,
-        });
-    }
-};
-
-/**
- * Update a user by userId
- * PUT /api/v1/users/:userId
- */
-export const updateUser = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const { userId } = req.params;
+        const userId = req.user.userId;
         const updateData: UpdateUserInput = req.body;
 
         // Check if user exists
@@ -157,13 +145,20 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
 };
 
 /**
- * Delete a user by userId
- * DELETE /api/v1/users/:userId
+ * Delete the current authenticated user
+ * DELETE /api/v1/users/me
+ * Protected: Requires authentication
  */
-export const deleteUser = async (req: Request, res: Response): Promise<void> => {
+export const deleteCurrentUser = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { userId } = req.params;
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
 
+        const userId = req.user.userId;
         const deleted = await UsersService.deleteUser(userId);
 
         if (!deleted) {

@@ -10,6 +10,7 @@ export interface User {
     email: string;
     password: string;
     userId: string; // Unique machine-readable identifier
+    company?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -21,6 +22,7 @@ export interface CreateUserInput {
     name: string;
     email: string;
     password: string;
+    company?: string;
 }
 
 /**
@@ -30,5 +32,6 @@ export interface UpdateUserInput {
     name?: string;
     email?: string;
     password?: string;
+    company?: string;
 }
 

@@ -88,6 +88,10 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
         updatedAt: now,
     };
 
+    if (userData.company) {
+        user.company = userData.company;
+    }
+
     const result = await collection.insertOne(user);
 
     if (!result.insertedId) {
