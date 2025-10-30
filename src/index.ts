@@ -4,6 +4,7 @@ import v1Routes from './routes/v1routes';
 import { connectToDatabase, closeDatabaseConnection } from './database/connection';
 import { createUserIndexes } from './services/users.service';
 import { createProjectIndexes } from './services/projects.service';
+import { createLogIndexes } from './services/logs.service';
 
 // Load environment variables
 dotenv.config();
@@ -25,6 +26,7 @@ async function startServer() {
         await connectToDatabase();
         await createUserIndexes();
         await createProjectIndexes();
+        await createLogIndexes();
 
         app.listen(PORT, () => {
             console.log(`🚀 API is running on port ${PORT}`);

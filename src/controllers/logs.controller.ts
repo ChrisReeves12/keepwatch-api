@@ -1,0 +1,164 @@
+import { Request, Response } from 'express';
+import { ObjectId } from 'mongodb';
+import * as LogsService from '../services/logs.service';
+import * as ProjectsService from '../services/projects.service';
+import * as UsersService from '../services/users.service';
+import { CreateLogInput } from '../types/log.types';
+
+/**
+ * Create a new log
+ * POST /api/v1/logs
+ * Protected: Requires authentication
+ */
+export const createLog = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const logData: CreateLogInput = req.body;
+
+        // Validate required fields
+        if (!logData.level || !logData.environment || !logData.projectId || !logData.message || logData.timestampMS === undefined) {
+            res.status(400).json({
+                error: 'Missing required fields: level, environment, projectId, message, timestampMS',
+            });
+            return;
+        }
+
+        // Verify project exists and user has access
+        const project = await ProjectsService.findProjectByProjectId(logData.projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Check if user has access to this project
+        const user = await UsersService.findUserByUserId(req.user.userId);
+        if (!user || !user._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const userObjectId = typeof user._id === 'string'
+            ? new ObjectId(user._id)
+            : user._id;
+
+        const hasAccess = project.users.some(pu => pu.id.toString() === userObjectId.toString());
+        if (!hasAccess) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        const log = await LogsService.createLog(logData);
+
+        res.status(201).json({
+            message: 'Log created successfully',
+            log,
+        });
+    } catch (error: any) {
+        console.error('Error creating log:', error);
+        res.status(500).json({
+            error: 'Failed to create log',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * Get logs for a project
+ * GET /api/v1/logs/:projectId
+ * Protected: Requires authentication, user must be part of the project
+ */
+export const getLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId } = req.params;
+
+        // Parse query parameters
+        const page = parseInt(req.query.page as string) || 1;
+        const pageSize = parseInt(req.query.pageSize as string) || 50;
+        const level = req.query.level as string | undefined;
+        const environment = req.query.environment as string | undefined;
+
+        // Validate page and pageSize
+        if (page < 1) {
+            res.status(400).json({
+                error: 'Page must be greater than 0',
+            });
+            return;
+        }
+
+        if (pageSize < 1 || pageSize > 1000) {
+            res.status(400).json({
+                error: 'Page size must be between 1 and 1000',
+            });
+            return;
+        }
+
+        // Verify project exists and user has access
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Check if user has access to this project
+        const user = await UsersService.findUserByUserId(req.user.userId);
+        if (!user || !user._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const userObjectId = typeof user._id === 'string'
+            ? new ObjectId(user._id)
+            : user._id;
+
+        const hasAccess = project.users.some(pu => pu.id.toString() === userObjectId.toString());
+        if (!hasAccess) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Get logs
+        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment);
+
+        res.json({
+            logs: result.logs,
+            pagination: {
+                page: result.page,
+                pageSize: result.pageSize,
+                total: result.total,
+                totalPages: result.totalPages,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error fetching logs:', error);
+        res.status(500).json({
+            error: 'Failed to fetch logs',
+            details: error.message,
+        });
+    }
+};
+
