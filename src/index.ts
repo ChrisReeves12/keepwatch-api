@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import v1Routes from './routes/v1routes';
 import { connectToDatabase, closeDatabaseConnection } from './database/connection';
 import { createUserIndexes } from './services/users.service';
+import { createProjectIndexes } from './services/projects.service';
 
 // Load environment variables
 dotenv.config();
@@ -23,6 +24,7 @@ async function startServer() {
         // Connect to MongoDB before starting the server
         await connectToDatabase();
         await createUserIndexes();
+        await createProjectIndexes();
 
         app.listen(PORT, () => {
             console.log(`🚀 API is running on port ${PORT}`);

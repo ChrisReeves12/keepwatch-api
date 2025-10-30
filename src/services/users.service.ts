@@ -195,6 +195,18 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
  */
 export async function deleteUser(userId: string): Promise<boolean> {
     const collection = getUsersCollection();
+
+    // Find user to get their MongoDB _id
+    const user = await findUserByUserId(userId);
+    if (!user || !user._id) {
+        return false;
+    }
+
+    // Remove user from all projects before deleting
+    const { removeUserFromAllProjects } = await import('./projects.service');
+    const userObjectId = typeof user._id === 'string' ? new ObjectId(user._id) : user._id;
+    await removeUserFromAllProjects(userObjectId);
+
     const result = await collection.deleteOne({ userId });
     return result.deletedCount === 1;
 }
