@@ -95,21 +95,23 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
         const { projectId } = req.params;
 
         // Parse query parameters
-        const page = parseInt(req.query.page as string) || 1;
-        const pageSize = parseInt(req.query.pageSize as string) || 50;
+        const pageParam = req.query.page as string | undefined;
+        const pageSizeParam = req.query.pageSize as string | undefined;
+        const page = pageParam ? parseInt(pageParam) : 1;
+        const pageSize = pageSizeParam ? parseInt(pageSizeParam) : 50;
         const level = req.query.level as string | undefined;
         const environment = req.query.environment as string | undefined;
         const message = req.query.message as string | undefined;
 
         // Validate page and pageSize
-        if (page < 1) {
+        if (isNaN(page) || page < 1) {
             res.status(400).json({
                 error: 'Page must be greater than 0',
             });
             return;
         }
 
-        if (pageSize < 1 || pageSize > 1000) {
+        if (isNaN(pageSize) || pageSize < 1 || pageSize > 1000) {
             res.status(400).json({
                 error: 'Page size must be between 1 and 1000',
             });

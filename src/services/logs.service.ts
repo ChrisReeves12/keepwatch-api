@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { getDatabase } from '../database/connection';
 import { Log, CreateLogInput } from '../types/log.types';
 import { getTypesenseClient } from './typesense.service';
+import { findProjectByProjectId } from './projects.service';
 
 const COLLECTION_NAME = 'logs';
 
@@ -65,12 +66,13 @@ export async function createLogIndexes(): Promise<void> {
 export async function createLog(logData: CreateLogInput): Promise<Log> {
     const collection = getLogsCollection();
 
-    // Convert projectId to ObjectId
-    if (!ObjectId.isValid(logData.projectId)) {
-        throw new Error('Invalid projectId');
+    // Look up project by projectId (string slug) to get its MongoDB _id
+    const project = await findProjectByProjectId(logData.projectId);
+    if (!project || !project._id) {
+        throw new Error('Project not found');
     }
 
-    const projectObjectId = new ObjectId(logData.projectId);
+    const projectObjectId = typeof project._id === 'string' ? new ObjectId(project._id) : project._id;
 
     const now = new Date();
     const log: Log = {
@@ -101,13 +103,24 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
 
 /**
  * Convert Typesense document to Log format
+ * @param doc - Typesense document
+ * @param projectId - Project ID (string slug) to use for lookup
+ * @returns Log object
  */
-function typesenseDocToLog(doc: any, projectId: string): Log {
+async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
+    // Look up project to get its MongoDB _id
+    const project = await findProjectByProjectId(doc.projectId || projectId);
+    if (!project || !project._id) {
+        throw new Error(`Project not found: ${doc.projectId || projectId}`);
+    }
+
+    const projectObjectId = typeof project._id === 'string' ? new ObjectId(project._id) : project._id;
+
     return {
         level: doc.level,
         environment: doc.environment,
         projectId: doc.projectId || projectId,
-        projectObjectId: new ObjectId(doc.projectId || projectId),
+        projectObjectId,
         message: doc.message,
         stackTrace: doc.stackTrace || [],
         details: doc.details || {},
@@ -170,8 +183,10 @@ export async function getLogsByProjectId(
     const totalPages = Math.ceil(total / pageSize);
 
     // Convert Typesense documents to Log format
-    const logs = (searchResults.hits || []).map((hit: any) =>
-        typesenseDocToLog(hit.document, projectId)
+    const logs = await Promise.all(
+        (searchResults.hits || []).map((hit: any) =>
+            typesenseDocToLog(hit.document, projectId)
+        )
     );
 
     return {
