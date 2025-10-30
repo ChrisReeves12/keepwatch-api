@@ -59,7 +59,11 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const log = await LogsService.createLog(logData);
+        // Insert into MongoDB and index in Typesense in parallel
+        const [log] = await Promise.all([
+            LogsService.createLog(logData),
+            LogsService.indexLogInSearch(logData),
+        ]);
 
         res.status(201).json({
             message: 'Log created successfully',
@@ -95,6 +99,7 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
         const pageSize = parseInt(req.query.pageSize as string) || 50;
         const level = req.query.level as string | undefined;
         const environment = req.query.environment as string | undefined;
+        const message = req.query.message as string | undefined;
 
         // Validate page and pageSize
         if (page < 1) {
@@ -141,8 +146,7 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        // Get logs
-        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment);
+        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment, message);
 
         res.json({
             logs: result.logs,

@@ -17,9 +17,25 @@ services:
     networks:
       - keepwatch-network
 
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: keepwatch-typesense
+    restart: unless-stopped
+    ports:
+      - "8108:8108"
+    environment:
+      TYPESENSE_DATA_DIR: /data
+      TYPESENSE_API_KEY: typesense-dev-key
+      TYPESENSE_ENABLE_CORS: "true"
+    volumes:
+      - typesense-data:/data
+    networks:
+      - keepwatch-network
+
 volumes:
   mongodb_data:
   mongodb_config:
+  typesense-data:
 
 networks:
   keepwatch-network:

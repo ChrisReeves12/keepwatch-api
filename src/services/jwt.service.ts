@@ -1,4 +1,8 @@
 import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
+
+// Ensure environment variables are loaded even if this module is imported early
+dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
 

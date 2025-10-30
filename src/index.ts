@@ -5,6 +5,7 @@ import { connectToDatabase, closeDatabaseConnection } from './database/connectio
 import { createUserIndexes } from './services/users.service';
 import { createProjectIndexes } from './services/projects.service';
 import { createLogIndexes } from './services/logs.service';
+import { createLogsTypesenseCollection } from './services/typesense.service';
 
 // Load environment variables
 dotenv.config();
@@ -28,9 +29,12 @@ async function startServer() {
         await createProjectIndexes();
         await createLogIndexes();
 
+        // Initialize Typesense collections
+        await createLogsTypesenseCollection();
+
         app.listen(PORT, () => {
-            console.log(`🚀 API is running on port ${PORT}`);
-            console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`API is running on port ${PORT}`);
+            console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);
@@ -40,13 +44,13 @@ async function startServer() {
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('\n⚠️  Shutting down gracefully...');
+    console.log('\nShutting down gracefully...');
     await closeDatabaseConnection();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    console.log('\n⚠️  Shutting down gracefully...');
+    console.log('\nShutting down gracefully...');
     await closeDatabaseConnection();
     process.exit(0);
 });
