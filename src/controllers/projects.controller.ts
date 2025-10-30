@@ -490,3 +490,118 @@ export const deleteProjectApiKey = async (req: Request, res: Response): Promise<
     }
 };
 
+/**
+ * Update a user's role on a project
+ * PUT /api/v1/projects/:projectId/users/:userId/role
+ * Protected: Requires authentication, current user must be admin on the project
+ */
+export const updateUserRoleOnProject = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId, userId } = req.params;
+        const { role } = req.body;
+
+        // Validate that a role was provided
+        if (!role) {
+            res.status(400).json({
+                error: 'Missing required field: role',
+            });
+            return;
+        }
+
+        // Validate that the role is valid
+        const validRoles = ['viewer', 'editor', 'admin'];
+        if (!validRoles.includes(role)) {
+            res.status(400).json({
+                error: `Invalid role. Must be one of: ${validRoles.join(', ')}`,
+            });
+            return;
+        }
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const currentUserObjectId = typeof currentUser._id === 'string'
+            ? new ObjectId(currentUser._id)
+            : currentUser._id;
+
+        // Check if current user is admin on the project
+        const currentProjectUser = project.users.find(pu => pu.id.toString() === currentUserObjectId.toString());
+        if (!currentProjectUser || currentProjectUser.role !== 'admin') {
+            res.status(403).json({
+                error: 'Forbidden: Only project admins can modify user roles',
+            });
+            return;
+        }
+
+        // Validate the userId is a valid ObjectId
+        if (!ObjectId.isValid(userId)) {
+            res.status(400).json({
+                error: 'Invalid user ID format',
+            });
+            return;
+        }
+
+        const targetUserObjectId = new ObjectId(userId);
+
+        // Verify the target user exists on the project
+        const targetProjectUser = project.users.find(pu => pu.id.toString() === targetUserObjectId.toString());
+        if (!targetProjectUser) {
+            res.status(404).json({
+                error: 'User is not a member of this project',
+            });
+            return;
+        }
+
+        // Prevent admin from changing their own role
+        if (currentUserObjectId.toString() === targetUserObjectId.toString() && role !== 'admin') {
+            res.status(400).json({
+                error: 'Admins cannot remove their own admin role',
+            });
+            return;
+        }
+
+        // Update the user's role
+        const updatedProject = await ProjectsService.updateUserRoleOnProject(projectId, targetUserObjectId, role);
+
+        if (!updatedProject) {
+            res.status(404).json({
+                error: 'Failed to update user role',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'User role updated successfully',
+            project: updatedProject,
+        });
+    } catch (error: any) {
+        console.error('Error updating user role:', error);
+        res.status(500).json({
+            error: 'Failed to update user role',
+            details: error.message,
+        });
+    }
+};
+

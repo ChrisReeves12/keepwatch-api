@@ -16,5 +16,8 @@ router.post('/:projectId/api-keys', authenticate, ProjectsController.createProje
 router.get('/:projectId/api-keys', authenticate, ProjectsController.getProjectApiKeys);
 router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController.deleteProjectApiKey);
 
+// User role routes
+router.put('/:projectId/users/:userId/role', authenticate, ProjectsController.updateUserRoleOnProject);
+
 export default router;
 

@@ -337,3 +337,43 @@ export async function findProjectByApiKey(apiKey: string): Promise<Project | nul
     return toProject(project);
 }
 
+/**
+ * Update a user's role on a project
+ * @param projectId - The unique projectId identifier
+ * @param userId - MongoDB ObjectId of the user whose role will be updated
+ * @param newRole - The new role to assign ('viewer' | 'editor' | 'admin')
+ * @returns Updated project document or null if project or user not found
+ */
+export async function updateUserRoleOnProject(
+    projectId: string,
+    userId: ObjectId,
+    newRole: 'viewer' | 'editor' | 'admin'
+): Promise<Project | null> {
+    const collection = getProjectsCollection();
+
+    // Verify the user exists on the project first
+    const project = await findProjectByProjectId(projectId);
+    if (!project) {
+        return null;
+    }
+
+    const userExists = project.users.some(pu => pu.id.toString() === userId.toString());
+    if (!userExists) {
+        return null;
+    }
+
+    const now = new Date();
+    const result = await collection.findOneAndUpdate(
+        { projectId, 'users.id': userId },
+        {
+            $set: {
+                'users.$.role': newRole,
+                updatedAt: now,
+            },
+        },
+        { returnDocument: 'after' }
+    );
+
+    return toProject(result);
+}
+
