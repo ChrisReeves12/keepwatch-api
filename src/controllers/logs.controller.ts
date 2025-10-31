@@ -70,11 +70,16 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
         const logData: CreateLogInput = req.body;
 
         // Validate required fields
-        if (!logData.level || !logData.environment || !logData.projectId || !logData.message || logData.timestampMS === undefined) {
+        if (!logData.level || !logData.environment || !logData.projectId || !logData.message) {
             res.status(400).json({
-                error: 'Missing required fields: level, environment, projectId, message, timestampMS',
+                error: 'Missing required fields: level, environment, projectId, message',
             });
             return;
+        }
+
+        // Generate timestamp if not provided
+        if (logData.timestampMS === undefined) {
+            logData.timestampMS = Date.now();
         }
 
         // Use the project from the API key
@@ -109,20 +114,14 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
 
 /**
  * @swagger
- * /api/v1/logs/{projectId}:
+ * /api/v1/logs:
  *   get:
  *     summary: Get logs for a project
- *     description: Get logs for a project with pagination and filtering. Requires JWT authentication. User must have access to the project.
+ *     description: Get logs for a project with pagination and filtering. Requires API key authentication via X-API-Key header. The project is identified by the API key.
  *     tags: [Logs]
  *     security:
- *       - bearerAuth: []
+ *       - apiKeyAuth: []
  *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *         description: Project slug identifier
  *       - in: query
  *         name: page
  *         schema:
@@ -187,19 +186,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  *       401:
- *         description: Authentication required
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       403:
- *         description: Forbidden - User does not have access to this project
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       404:
- *         description: Project or user not found
+ *         description: API key authentication required
  *         content:
  *           application/json:
  *             schema:
@@ -213,15 +200,17 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  */
 export const getLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
     try {
-        // Verify JWT authentication
-        if (!req.user) {
+        // Verify API key authentication
+        if (!req.apiKeyProject) {
             res.status(401).json({
-                error: 'Authentication required',
+                error: 'API key authentication required',
             });
             return;
         }
 
-        const { projectId } = req.params;
+        // Use the project from the API key
+        const project = req.apiKeyProject;
+        const projectId = project.projectId;
 
         // Parse query parameters
         const pageParam = req.query.page as string | undefined;
@@ -247,32 +236,6 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        // Verify project exists and user has access
-        const project = await ProjectsService.findProjectByProjectId(projectId);
-        if (!project) {
-            res.status(404).json({
-                error: 'Project not found',
-            });
-            return;
-        }
-
-        // Check if user has access to this project
-        const user = await UsersService.findUserByUserId(req.user.userId);
-        if (!user || !user._id) {
-            res.status(404).json({
-                error: 'User not found',
-            });
-            return;
-        }
-
-        const hasAccess = project.users.some(pu => pu.id === user._id);
-        if (!hasAccess) {
-            res.status(403).json({
-                error: 'Forbidden: You do not have access to this project',
-            });
-            return;
-        }
-
         const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment, message);
 
         res.json({
@@ -288,6 +251,190 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
         console.error('Error fetching logs:', error);
         res.status(500).json({
             error: 'Failed to fetch logs',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/logs/{projectId}:
+ *   delete:
+ *     summary: Purge logs for a project
+ *     description: Delete logs for a project with optional filters. Only admins can delete logs. Supports filtering by time range, lookback time, environment, and level.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: query
+ *         name: lookbackTime
+ *         schema:
+ *           type: string
+ *         description: Delete logs older than this lookback time (e.g., "5d", "2h", "10m", "3months")
+ *       - in: query
+ *         name: timeRange
+ *         schema:
+ *           type: string
+ *         description: Delete logs within this time range (e.g., "2024-01-01 to 2024-01-31" or "2024-01-01-12:00:00 to 2024-01-31-23:59:59")
+ *       - in: query
+ *         name: env
+ *         schema:
+ *           type: string
+ *         description: Filter by environment name
+ *       - in: query
+ *         name: level
+ *         schema:
+ *           type: string
+ *         description: Filter by log level (e.g., error, warn, info, debug)
+ *     responses:
+ *       200:
+ *         description: Logs purged successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Logs purged successfully
+ *                 deletedCount:
+ *                   type: number
+ *                   example: 150
+ *       400:
+ *         description: Invalid query parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only project admins can delete logs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const purgeProjectLogs = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Verify JWT authentication
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get projectId from path params
+        const { projectId } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
+
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is admin on the project
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser || currentProjectUser.role !== 'admin') {
+            res.status(403).json({
+                error: 'Forbidden: Only project admins can delete logs',
+            });
+            return;
+        }
+
+        // Parse query parameters
+        const lookbackTime = req.query.lookbackTime as string | undefined;
+        const timeRange = req.query.timeRange as string | undefined;
+        const env = req.query.env as string | undefined;
+        const level = req.query.level as string | undefined;
+
+        // Validate that both lookbackTime and timeRange are not provided
+        if (lookbackTime && timeRange) {
+            res.status(400).json({
+                error: 'Cannot specify both lookbackTime and timeRange. Please use only one.',
+            });
+            return;
+        }
+
+        // Parse time filters
+        const timeFilters = LogsService.parseTimeFilters(lookbackTime, timeRange);
+        if (timeFilters === null) {
+            res.status(400).json({
+                error: 'Invalid time filter format. Use lookbackTime (e.g., "5d", "2h") or timeRange (e.g., "2024-01-01 to 2024-01-31")',
+            });
+            return;
+        }
+
+        // Build delete options
+        const deleteOptions: {
+            level?: string;
+            environment?: string;
+            minTimestampMS?: number;
+            maxTimestampMS?: number;
+        } = {
+            ...timeFilters,
+        };
+
+        if (level) {
+            deleteOptions.level = level;
+        }
+
+        if (env) {
+            deleteOptions.environment = env;
+        }
+
+        // Delete logs
+        const result = await LogsService.deleteLogsByProjectId(projectId, deleteOptions);
+
+        res.json({
+            message: 'Logs purged successfully',
+            deletedCount: result.deletedCount,
+        });
+    } catch (error: any) {
+        console.error('Error purging logs:', error);
+        res.status(500).json({
+            error: 'Failed to purge logs',
             details: error.message,
         });
     }

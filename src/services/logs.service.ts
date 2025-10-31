@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
 import { Log, CreateLogInput } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
@@ -65,8 +66,9 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
         projectObjectId: projectDocId, // Store the Firestore document ID
         message: logData.message,
         stackTrace: logData.stackTrace || [],
+        rawStackTrace: logData.rawStackTrace,
         details: logData.details || {},
-        timestampMS: logData.timestampMS,
+        timestampMS: logData.timestampMS ?? Date.now(), // Use provided timestamp or generate one
         createdAt: now,
     };
 
@@ -98,6 +100,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
         projectObjectId: projectDocId,
         message: doc.message,
         stackTrace: doc.stackTrace || [],
+        rawStackTrace: doc.rawStackTrace,
         details: doc.details || {},
         timestampMS: doc.timestampMS,
         createdAt: doc.createdAt ? new Date(doc.createdAt) : new Date(doc.timestampMS),
@@ -209,8 +212,9 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             projectId: logData.projectId,
             message: logData.message,
             stackTrace: logData.stackTrace || [],
+            rawStackTrace: logData.rawStackTrace,
             details: logData.details || {},
-            timestampMS: logData.timestampMS,
+            timestampMS: logData.timestampMS ?? Date.now(), // Use provided timestamp or generate one
             createdAt: 'createdAt' in logData && logData.createdAt instanceof Date
                 ? logData.createdAt.getTime()
                 : Date.now(),
@@ -277,4 +281,285 @@ async function getLogsByProjectIdFromFirestore(
         pageSize,
         totalPages,
     };
+}
+
+/**
+ * Parse lookback time string (e.g., "5d", "2h", "10m", "3months") and return milliseconds
+ * @param lookbackTime - String like "5d", "2h", "10m", "3months"
+ * @returns Milliseconds since epoch for the lookback time, or null if invalid
+ */
+function parseLookbackTime(lookbackTime: string): number | null {
+    try {
+        // Parse formats like "5d", "2h", "10m", "3months"
+        const match = lookbackTime.match(/^(\d+)([a-z]+)$/i);
+        if (!match) {
+            return null;
+        }
+
+        const value = parseInt(match[1]);
+        const unit = match[2].toLowerCase();
+
+        // Map units to moment.js units
+        const unitMap: Record<string, moment.unitOfTime.DurationConstructor> = {
+            's': 'seconds',
+            'sec': 'seconds',
+            'second': 'seconds',
+            'seconds': 'seconds',
+            'm': 'minutes',
+            'min': 'minutes',
+            'minute': 'minutes',
+            'minutes': 'minutes',
+            'h': 'hours',
+            'hr': 'hours',
+            'hour': 'hours',
+            'hours': 'hours',
+            'd': 'days',
+            'day': 'days',
+            'days': 'days',
+            'w': 'weeks',
+            'week': 'weeks',
+            'weeks': 'weeks',
+            'month': 'months',
+            'months': 'months',
+            'y': 'years',
+            'yr': 'years',
+            'year': 'years',
+            'years': 'years',
+        };
+
+        const momentUnit = unitMap[unit];
+        if (!momentUnit) {
+            return null;
+        }
+
+        const now = moment.utc();
+        const lookbackDate = now.subtract(value, momentUnit);
+        return lookbackDate.valueOf();
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Parse time range string (e.g., "2024-01-01 to 2024-01-31" or "2024-01-01-12:00:00 to 2024-01-31-23:59:59")
+ * @param timeRange - String like "YYYY-MM-DD to YYYY-MM-DD" or "YYYY-MM-DD-HH:MM:SS to YYYY-MM-DD-HH:MM:SS"
+ * @returns Object with start and end timestamps in milliseconds, or null if invalid
+ */
+function parseTimeRange(timeRange: string): { startMS: number; endMS: number } | null {
+    try {
+        const parts = timeRange.split(' to ').map(s => s.trim());
+        if (parts.length !== 2) {
+            return null;
+        }
+
+        const [startStr, endStr] = parts;
+
+        // Try parsing with time format first (YYYY-MM-DD-HH:MM:SS)
+        let startMoment = moment.utc(startStr, 'YYYY-MM-DD-HH:mm:ss', true);
+        let endMoment = moment.utc(endStr, 'YYYY-MM-DD-HH:mm:ss', true);
+
+        // If that fails, try date-only format (YYYY-MM-DD)
+        if (!startMoment.isValid()) {
+            startMoment = moment.utc(startStr, 'YYYY-MM-DD', true);
+        }
+        if (!endMoment.isValid()) {
+            endMoment = moment.utc(endStr, 'YYYY-MM-DD', true);
+        }
+
+        // If date-only, set start to beginning of day and end to end of day
+        if (startStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            startMoment = startMoment.startOf('day');
+        }
+        if (endStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            endMoment = endMoment.endOf('day');
+        }
+
+        if (!startMoment.isValid() || !endMoment.isValid()) {
+            return null;
+        }
+
+        return {
+            startMS: startMoment.valueOf(),
+            endMS: endMoment.valueOf(),
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Delete logs for a project with optional filters
+ * @param projectId - The projectId to delete logs for
+ * @param options - Filter options
+ * @returns Number of logs deleted
+ */
+export async function deleteLogsByProjectId(
+    projectId: string,
+    options?: {
+        level?: string;
+        environment?: string;
+        minTimestampMS?: number;
+        maxTimestampMS?: number;
+    }
+): Promise<{ deletedCount: number }> {
+    const collection = getLogsCollection();
+
+    // Build Firestore query
+    let query: FirebaseFirestore.Query = collection.where('projectId', '==', projectId);
+
+    if (options?.level) {
+        query = query.where('level', '==', options.level);
+    }
+
+    if (options?.environment) {
+        query = query.where('environment', '==', options.environment);
+    }
+
+    if (options?.minTimestampMS !== undefined) {
+        query = query.where('timestampMS', '>=', options.minTimestampMS);
+    }
+
+    if (options?.maxTimestampMS !== undefined) {
+        query = query.where('timestampMS', '<=', options.maxTimestampMS);
+    }
+
+    // Get all matching documents
+    const snapshot = await query.get();
+    const docsToDelete = snapshot.docs;
+    let deletedCount = 0;
+
+    // Delete from Firestore in batches (Firestore batch limit is 500)
+    const batchSize = 500;
+    for (let i = 0; i < docsToDelete.length; i += batchSize) {
+        const batch = collection.firestore.batch();
+        const batchDocs = docsToDelete.slice(i, i + batchSize);
+
+        for (const doc of batchDocs) {
+            batch.delete(doc.ref);
+        }
+
+        await batch.commit();
+        deletedCount += batchDocs.length;
+    }
+
+    // Delete from Typesense if enabled
+    if (isTypesenseEnabled()) {
+        try {
+            const typesenseClient = getTypesenseClient();
+
+            // Build filter_by clause for Typesense
+            const filterBy: string[] = [`projectId:${projectId}`];
+
+            if (options?.level) {
+                filterBy.push(`level:${options.level}`);
+            }
+
+            if (options?.environment) {
+                filterBy.push(`environment:${options.environment}`);
+            }
+
+            if (options?.minTimestampMS !== undefined) {
+                filterBy.push(`timestampMS:>=${options.minTimestampMS}`);
+            }
+
+            if (options?.maxTimestampMS !== undefined) {
+                filterBy.push(`timestampMS:<=${options.maxTimestampMS}`);
+            }
+
+            // Typesense doesn't support bulk delete by filter, so we need to search and delete
+            // Process in pages to avoid memory issues
+            let page = 1;
+            const perPage = 250; // Typesense max per page
+            let hasMore = true;
+            let typesenseDeletedCount = 0;
+
+            while (hasMore) {
+                const searchResults = await typesenseClient
+                    .collections('logs')
+                    .documents()
+                    .search({
+                        q: '*',
+                        filter_by: filterBy.join(' && '),
+                        per_page: perPage,
+                        page: page,
+                    });
+
+                const hits = searchResults.hits || [];
+                if (hits.length === 0) {
+                    hasMore = false;
+                    break;
+                }
+
+                // Delete each document
+                for (const hit of hits) {
+                    try {
+                        const documentId = (hit.document as any).id;
+                        if (documentId) {
+                            await typesenseClient
+                                .collections('logs')
+                                .documents(documentId)
+                                .delete();
+                            typesenseDeletedCount++;
+                        }
+                    } catch (error: any) {
+                        // Ignore 404 errors (document already deleted)
+                        if (error?.httpStatus !== 404) {
+                            console.error('Error deleting Typesense document:', error);
+                        }
+                    }
+                }
+
+                // Check if there are more pages
+                const totalFound = searchResults.found || 0;
+                hasMore = page * perPage < totalFound;
+                page++;
+            }
+
+            console.log(`Deleted ${typesenseDeletedCount} documents from Typesense`);
+        } catch (error) {
+            console.error('Error deleting logs from Typesense:', error);
+            // Don't throw - Firestore deletion succeeded, Typesense is secondary
+        }
+    }
+
+    return { deletedCount };
+}
+
+/**
+ * Helper function to parse lookback time and time range from query parameters
+ * @param lookbackTime - Optional lookback time string
+ * @param timeRange - Optional time range string
+ * @returns Object with minTimestampMS and maxTimestampMS, or null if invalid
+ */
+export function parseTimeFilters(
+    lookbackTime?: string,
+    timeRange?: string
+): { minTimestampMS?: number; maxTimestampMS?: number } | null {
+    if (lookbackTime && timeRange) {
+        // Both cannot be specified
+        return null;
+    }
+
+    if (lookbackTime) {
+        const thresholdMS = parseLookbackTime(lookbackTime);
+        if (thresholdMS === null) {
+            return null;
+        }
+        // Delete logs older than the threshold (keep only logs within the lookback window)
+        return { maxTimestampMS: thresholdMS };
+    }
+
+    if (timeRange) {
+        const range = parseTimeRange(timeRange);
+        if (range === null) {
+            return null;
+        }
+        return {
+            minTimestampMS: range.startMS,
+            maxTimestampMS: range.endMS,
+        };
+    }
+
+    // No time filters
+    return {};
 }
