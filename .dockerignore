@@ -1,0 +1,14 @@
+# Ignore Git
+.git
+.gitignore
+
+# Ignore node_modules
+node_modules
+
+# Ignore build output
+dist
+
+# Ignore local development files
+.env
+docker-compose.yml
+npm-debug.log
