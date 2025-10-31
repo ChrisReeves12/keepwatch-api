@@ -9,7 +9,8 @@ steps:
     id: 'Run tests'
     args: ['test']
     env:
-      - 'CI=true' # Ensures tests run in CI mode
+      - 'CI=true'
+      - 'JWT_SECRET=test-jwt-secret-key-for-testing-only'
 
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
