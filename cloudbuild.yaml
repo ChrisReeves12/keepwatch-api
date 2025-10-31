@@ -55,3 +55,7 @@ substitutions:
 # Store images in Artifact Registry
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:${SHORT_SHA}'
+
+# Options for the build
+options:
+  logging: CLOUD_LOGGING_ONLY
