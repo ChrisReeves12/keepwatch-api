@@ -2,10 +2,18 @@ import { Client } from 'typesense';
 
 let client: Client | null = null;
 
+export function isTypesenseEnabled(): boolean {
+    return process.env.USE_TYPESENSE !== 'false';
+}
+
 /**
  * Get or create Typesense client
  */
 export function getTypesenseClient(): Client {
+    if (!isTypesenseEnabled()) {
+        throw new Error('Typesense is disabled');
+    }
+
     if (client) {
         return client;
     }
@@ -86,6 +94,11 @@ const logsCollectionSchema = {
  * Creates the collection if it doesn't exist
  */
 export async function createLogsTypesenseCollection(): Promise<void> {
+    if (!isTypesenseEnabled()) {
+        console.log('⚠️ Typesense disabled; skipping collection setup');
+        return;
+    }
+
     try {
         const typesenseClient = getTypesenseClient();
 

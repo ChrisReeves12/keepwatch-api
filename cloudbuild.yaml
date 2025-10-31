@@ -1,15 +1,15 @@
 steps:
-  # # Install dependencies for testing
-  # - name: 'gcr.io/cloud-builders/npm'
-  #   id: 'Install dependencies'
-  #   args: ['install']
+  # Install dependencies for testing
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'Install dependencies'
+    args: ['install']
 
-  # # Run tests
-  # - name: 'gcr.io/cloud-builders/npm'
-  #   id: 'Run tests'
-  #   args: ['test']
-  #   env:
-  #     - 'CI=true' # Ensures tests run in CI mode
+  # Run tests
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'Run tests'
+    args: ['test']
+    env:
+      - 'CI=true' # Ensures tests run in CI mode
 
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'

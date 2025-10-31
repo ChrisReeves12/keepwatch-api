@@ -2,7 +2,7 @@ import { ObjectId, WithId } from 'mongodb';
 import { randomUUID } from 'crypto';
 import { getDatabase } from '../database/connection';
 import { Log, CreateLogInput } from '../types/log.types';
-import { getTypesenseClient } from './typesense.service';
+import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId } from './projects.service';
 
 const COLLECTION_NAME = 'logs';
@@ -147,6 +147,10 @@ export async function getLogsByProjectId(
     environment?: string,
     message?: string
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
+    if (!isTypesenseEnabled()) {
+        return getLogsByProjectIdFromMongo(projectId, page, pageSize, level, environment, message);
+    }
+
     const typesenseClient = getTypesenseClient();
 
     // Build filter_by clause
@@ -219,6 +223,10 @@ export async function findLogById(id: string): Promise<Log | null> {
  * @param logData - Log data to index (can be CreateLogInput or Log)
  */
 export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<void> {
+    if (!isTypesenseEnabled()) {
+        return;
+    }
+
     try {
         const typesenseClient = getTypesenseClient();
 
@@ -243,5 +251,50 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
         console.error('Failed to index log in Typesense:', error);
         throw error;
     }
+}
+
+async function getLogsByProjectIdFromMongo(
+    projectId: string,
+    page: number,
+    pageSize: number,
+    level?: string,
+    environment?: string,
+    message?: string
+): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
+    const collection = getLogsCollection();
+
+    const query: Record<string, any> = { projectId };
+
+    if (level) {
+        query.level = level;
+    }
+
+    if (environment) {
+        query.environment = environment;
+    }
+
+    if (message) {
+        query.message = { $regex: message, $options: 'i' };
+    }
+
+    const total = await collection.countDocuments(query);
+    const totalPages = Math.ceil(total / pageSize);
+
+    const logsCursor = collection
+        .find(query)
+        .sort({ timestampMS: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize);
+
+    const documents = await logsCursor.toArray();
+    const logs = documents.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
+
+    return {
+        logs,
+        total,
+        page,
+        pageSize,
+        totalPages,
+    };
 }
 
