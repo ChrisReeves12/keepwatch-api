@@ -46,16 +46,13 @@ steps:
       - '--update-secrets=TYPESENSE_API_KEY=TYPESENSE_API_KEY:latest,TYPESENSE_HOST=TYPESENSE_HOST:latest,REDIS_HOST=REDIS_HOST:latest,MONGODB_CONNECTION_STRING=MONGODB_CONNECTION_STRING:latest,JWT_SECRET=JWT_SECRET:latest'
       - '--set-env-vars=TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379,JWT_EXPIRY=30d'
 
-# Available substitutions
 substitutions:
   _SERVICE_NAME: 'keepwatch-api'
-  _REGION: 'us-central1' # Change to your preferred region
-  _REPOSITORY: 'keepwatch-api' # The name of your Artifact Registry repository
+  _REGION: 'us-central1'
+  _REPOSITORY: 'keepwatch-api'
 
-# Store images in Artifact Registry
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}:${SHORT_SHA}'
 
-# Options for the build
 options:
   logging: CLOUD_LOGGING_ONLY
