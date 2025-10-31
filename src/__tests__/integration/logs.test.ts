@@ -1,10 +1,9 @@
 import request from 'supertest';
-import { ObjectId } from 'mongodb';
 import { randomUUID } from 'crypto';
 import { createTestApp } from '../helpers/test-app.helper';
 import { createTestToken, createAuthHeader } from '../helpers/auth.helper';
 import { createTestUser, createTestProject } from '../helpers/db.helper';
-import { getDatabase } from '../../database/connection';
+import { getFirestore } from '../../database/firestore.connection';
 import { getTypesenseClient } from '../../services/typesense.service';
 
 const app = createTestApp();
@@ -32,13 +31,15 @@ describe('Log Endpoints Integration Tests', () => {
         testUserToken = createTestToken(testUser.userId, testUser.email);
 
         // Create test project with test user as admin
-        const userObjectId = typeof testUser._id === 'string' ? new ObjectId(testUser._id) : testUser._id;
+        if (!testUser._id) {
+            throw new Error('Test user _id is required');
+        }
         testProject = await createTestProject(
             {
                 name: `Test Project ${timestamp} ${randomSuffix}`,
                 description: 'A test project',
             },
-            userObjectId
+            testUser._id
         );
 
         // Create another user for access control tests
@@ -51,13 +52,15 @@ describe('Log Endpoints Integration Tests', () => {
         otherUserToken = createTestToken(otherUser.userId, otherUser.email);
 
         // Create another project for the other user
-        const otherUserObjectId = typeof otherUser._id === 'string' ? new ObjectId(otherUser._id) : otherUser._id;
+        if (!otherUser._id) {
+            throw new Error('Other user _id is required');
+        }
         otherProject = await createTestProject(
             {
                 name: `Other Project ${timestamp} ${randomSuffix}`,
                 description: 'Another test project',
             },
-            otherUserObjectId
+            otherUser._id
         );
     });
 
@@ -206,16 +209,20 @@ describe('Log Endpoints Integration Tests', () => {
     describe('GET /api/v1/logs/:projectId', () => {
         beforeEach(async () => {
             // Create some test logs
-            const db = getDatabase();
+            const db = getFirestore();
             if (!db) {
                 throw new Error('Database not connected');
             }
 
-            const logsCollection = db.collection('logs');
-            const projectObjectId = typeof testProject._id === 'string' ? new ObjectId(testProject._id) : testProject._id;
+            if (!testProject._id) {
+                throw new Error('Test project _id is required');
+            }
 
-            // Insert logs directly into MongoDB
-            await logsCollection.insertMany([
+            const logsCollection = db.collection('logs');
+            const projectObjectId = testProject._id;
+
+            // Insert logs directly into Firestore
+            const logsToInsert = [
                 {
                     level: 'error',
                     environment: 'production',
@@ -249,13 +256,17 @@ describe('Log Endpoints Integration Tests', () => {
                     timestampMS: Date.now() - 3000,
                     createdAt: new Date(),
                 },
-            ]);
+            ];
+
+            // Insert logs into Firestore
+            for (const log of logsToInsert) {
+                await logsCollection.add(log);
+            }
 
             // Index logs in Typesense
             const typesenseClient = getTypesenseClient();
-            const logs = await logsCollection.find({ projectId: testProject.projectId }).toArray();
             
-            for (const log of logs) {
+            for (const log of logsToInsert) {
                 try {
                     // Use UUID for Typesense document ID to match production behavior
                     await typesenseClient.collections('logs').documents().create({
@@ -305,7 +316,7 @@ describe('Log Endpoints Integration Tests', () => {
         });
 
         it('should return 404 when project does not exist', async () => {
-            const nonExistentProjectId = new ObjectId().toString();
+            const nonExistentProjectId = 'non-existent-project-id';
 
             const response = await request(app)
                 .get(`/api/v1/logs/${nonExistentProjectId}`)
@@ -413,13 +424,15 @@ describe('Log Endpoints Integration Tests', () => {
             // Create a new project with no logs
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).substring(7);
-            const userObjectId = typeof testUser._id === 'string' ? new ObjectId(testUser._id) : testUser._id;
+            if (!testUser._id) {
+                throw new Error('Test user _id is required');
+            }
             const emptyProject = await createTestProject(
                 {
                     name: `Empty Project ${timestamp} ${randomSuffix}`,
                     description: 'A project with no logs',
                 },
-                userObjectId
+                testUser._id
             );
 
             const response = await request(app)

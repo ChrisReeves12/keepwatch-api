@@ -4,8 +4,8 @@
   "description": "Node.js Express API with TypeScript",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "dev-debug": "ts-node-dev --respawn --transpile-only --inspect src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "dev-debug": "tsx --inspect=0.0.0.0:9229 src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
@@ -24,6 +24,8 @@
     "firebase-admin": "^13.5.0",
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "typesense": "^2.1.0"
   },
   "devDependencies": {
@@ -33,11 +35,14 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.10.5",
     "@types/supertest": "^6.0.3",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.2.0",
     "supertest": "^7.1.4",
     "ts-jest": "^29.4.5",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.20.6",
     "typescript": "^5.3.3"
   }
 }

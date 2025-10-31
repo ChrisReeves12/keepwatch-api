@@ -1,9 +1,8 @@
 import request from 'supertest';
-import { ObjectId } from 'mongodb';
 import { createTestApp } from '../helpers/test-app.helper';
 import { createTestToken, createAuthHeader } from '../helpers/auth.helper';
 import { createTestUser, createTestProject } from '../helpers/db.helper';
-import { getDatabase } from '../../database/connection';
+import { getFirestore } from '../../database/firestore.connection';
 import { findProjectByProjectId } from '../../services/projects.service';
 import { ProjectUser } from '../../types/project.types';
 
@@ -32,13 +31,15 @@ describe('Project API Keys Integration Tests', () => {
         });
         adminToken = createTestToken(adminUser.userId, adminUser.email);
 
-        const adminObjectId = typeof adminUser._id === 'string' ? new ObjectId(adminUser._id) : adminUser._id;
+        if (!adminUser._id) {
+            throw new Error('Admin user _id is required');
+        }
         testProject = await createTestProject(
             {
                 name: `Test Project ${timestamp} ${randomSuffix}`,
                 description: 'A test project',
             },
-            adminObjectId
+            adminUser._id
         );
 
         // Create editor user
@@ -66,37 +67,38 @@ describe('Project API Keys Integration Tests', () => {
         otherUserToken = createTestToken(otherUser.userId, otherUser.email);
 
         // Add editor and viewer users to the project
-        const db = getDatabase();
+        const db = getFirestore();
         if (!db) {
             throw new Error('Database not connected');
         }
 
-        const projectsCollection = db.collection('projects');
-        const editorObjectId = typeof editorUser._id === 'string' ? new ObjectId(editorUser._id) : editorUser._id;
-        const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+        if (!editorUser._id || !viewerUser._id) {
+            throw new Error('User _id is required');
+        }
 
         const editorProjectUser: ProjectUser = {
-            id: editorObjectId,
+            id: editorUser._id,
             role: 'editor',
         };
 
         const viewerProjectUser: ProjectUser = {
-            id: viewerObjectId,
+            id: viewerUser._id,
             role: 'viewer',
         };
 
         // Fetch the project, update users array, and save
-        const project = await projectsCollection.findOne({ projectId: testProject.projectId });
-        if (project) {
+        const projectsCollection = db.collection('projects');
+        const projectSnapshot = await projectsCollection.where('projectId', '==', testProject.projectId).limit(1).get();
+        
+        if (!projectSnapshot.empty) {
+            const projectDoc = projectSnapshot.docs[0];
+            const project = projectDoc.data();
             const updatedUsers = [
                 ...(project.users || []),
                 editorProjectUser,
                 viewerProjectUser,
             ];
-            await projectsCollection.updateOne(
-                { projectId: testProject.projectId },
-                { $set: { users: updatedUsers } }
-            );
+            await projectDoc.ref.update({ users: updatedUsers });
         }
     });
 
@@ -276,13 +278,15 @@ describe('Project API Keys Integration Tests', () => {
             // Create a new project with no API keys
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).substring(7);
-            const adminObjectId = typeof adminUser._id === 'string' ? new ObjectId(adminUser._id) : adminUser._id;
+            if (!adminUser._id) {
+                throw new Error('Admin user _id is required');
+            }
             const emptyProject = await createTestProject(
                 {
                     name: `Empty Project ${timestamp} ${randomSuffix}`,
                     description: 'A project with no API keys',
                 },
-                adminObjectId
+                adminUser._id
             );
 
             const response = await request(app)

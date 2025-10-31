@@ -5,9 +5,57 @@ import * as UsersService from '../services/users.service';
 import { CreateLogInput } from '../types/log.types';
 
 /**
- * Create a new log
- * POST /api/v1/logs
- * Protected: Requires API key authentication
+ * @swagger
+ * /api/v1/logs:
+ *   post:
+ *     summary: Create a new log
+ *     description: Create a new log entry. Requires API key authentication via X-API-Key header.
+ *     tags: [Logs]
+ *     security:
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateLogInput'
+ *     responses:
+ *       201:
+ *         description: Log created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Log created successfully
+ *                 log:
+ *                   $ref: '#/components/schemas/Log'
+ *       400:
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: API key authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - API key project does not match the requested project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const createLog = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -40,7 +88,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Insert into MongoDB and index in Typesense in parallel
+        // Insert into Firestore and index in Typesense in parallel
         const [log] = await Promise.all([
             LogsService.createLog(logData),
             LogsService.indexLogInSearch(logData),
@@ -60,9 +108,108 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
 };
 
 /**
- * Get logs for a project
- * GET /api/v1/logs/:projectId
- * Protected: Requires JWT authentication
+ * @swagger
+ * /api/v1/logs/{projectId}:
+ *   get:
+ *     summary: Get logs for a project
+ *     description: Get logs for a project with pagination and filtering. Requires JWT authentication. User must have access to the project.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 1000
+ *           default: 50
+ *         description: Number of logs per page
+ *       - in: query
+ *         name: level
+ *         schema:
+ *           type: string
+ *         description: Filter by log level (e.g., error, warn, info, debug)
+ *       - in: query
+ *         name: environment
+ *         schema:
+ *           type: string
+ *         description: Filter by environment name
+ *       - in: query
+ *         name: message
+ *         schema:
+ *           type: string
+ *         description: Search in log messages
+ *     responses:
+ *       200:
+ *         description: Logs retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 logs:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Log'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: number
+ *                       example: 1
+ *                     pageSize:
+ *                       type: number
+ *                       example: 50
+ *                     total:
+ *                       type: number
+ *                       example: 100
+ *                     totalPages:
+ *                       type: number
+ *                       example: 2
+ *       400:
+ *         description: Invalid pagination parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const getLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
     try {

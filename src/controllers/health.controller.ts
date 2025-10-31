@@ -1,9 +1,24 @@
 import { Request, Response } from 'express';
 import { appVersion } from "../config/app.config";
 import { getRedisClient, isCachingEnabled } from '../services/redis.service';
-import { getDatabase } from '../database/connection';
 import { getTypesenseClient } from '../services/typesense.service';
+import { getFirestore } from '../database/firestore.connection';
 
+/**
+ * @swagger
+ * /api/v1:
+ *   get:
+ *     summary: Health check endpoint
+ *     description: Returns the health status of the API and its dependencies (Firestore, Typesense, Redis)
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: Health status information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthResponse'
+ */
 export const getHealth = async (req: Request, res: Response): Promise<void> => {
     const health: any = {
         status: 'KeepWatch API: Status OK',
@@ -12,22 +27,23 @@ export const getHealth = async (req: Request, res: Response): Promise<void> => {
         timestamp: new Date().toISOString(),
     };
 
-    // Check MongoDB connectivity
+    // Check Firestore connectivity
     try {
-        const db = getDatabase();
+        const db = getFirestore();
         if (db) {
-            await db.admin().ping();
-            health.mongodb = {
+            // Simple connectivity check - try to get a non-existent collection
+            await db.collection('_health_check').limit(1).get();
+            health.firestore = {
                 status: 'connected',
             };
         } else {
-            health.mongodb = {
+            health.firestore = {
                 status: 'disconnected',
-                message: 'MongoDB client not initialized',
+                message: 'Firestore client not initialized',
             };
         }
     } catch (error) {
-        health.mongodb = {
+        health.firestore = {
             status: 'error',
             message: error instanceof Error ? error.message : 'Unknown error',
         };

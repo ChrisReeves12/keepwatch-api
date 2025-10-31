@@ -1,5 +1,6 @@
 import express, { Express } from 'express';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
 import v1Routes from './routes/v1routes';
 import { connectToFirestore, closeFirestoreConnection } from './database/firestore.connection';
 import { createUserIndexes } from './services/users.service';
@@ -7,6 +8,7 @@ import { createProjectIndexes } from './services/projects.service';
 import { createLogIndexes } from './services/logs.service';
 import { createLogsTypesenseCollection } from './services/typesense.service';
 import { connectToRedis, closeRedisConnection, isCachingEnabled } from './services/redis.service';
+import { swaggerSpec } from './config/swagger.config';
 
 // Load environment variables
 dotenv.config();
@@ -17,6 +19,12 @@ const PORT = process.env.PORT || 3300;
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'KeepWatch API Documentation',
+}));
 
 // Routes
 app.use('/api/v1', v1Routes);

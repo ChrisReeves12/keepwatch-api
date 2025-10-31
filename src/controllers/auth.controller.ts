@@ -4,8 +4,64 @@ import { verifyPassword } from '../services/crypt.service';
 import { createToken } from '../services/jwt.service';
 
 /**
- * Authenticate a user with email and password
- * POST /api/v1/auth/authenticate
+ * @swagger
+ * /api/v1/auth:
+ *   post:
+ *     summary: Authenticate a user
+ *     description: Authenticate a user with email and password. Returns a JWT token upon successful authentication.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Authentication successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Authentication successful
+ *                 token:
+ *                   type: string
+ *                   description: JWT token for authenticated requests
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Invalid email or password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const authenticate = async (req: Request, res: Response): Promise<void> => {
     try {

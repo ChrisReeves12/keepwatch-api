@@ -4,9 +4,57 @@ import { CreateProjectInput, UpdateProjectInput } from '../types/project.types';
 import * as UsersService from '../services/users.service';
 
 /**
- * Create a new project
- * POST /api/v1/projects
- * Protected: Requires authentication
+ * @swagger
+ * /api/v1/projects:
+ *   post:
+ *     summary: Create a new project
+ *     description: Create a new project. The authenticated user will be added as an admin.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateProjectInput'
+ *     responses:
+ *       201:
+ *         description: Project created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Project created successfully
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       400:
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const createProject = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -52,9 +100,47 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
 };
 
 /**
- * Get all projects for the current authenticated user
- * GET /api/v1/projects
- * Protected: Requires authentication
+ * @swagger
+ * /api/v1/projects:
+ *   get:
+ *     summary: Get all projects for current user
+ *     description: Get all projects that the authenticated user has access to
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Projects retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 projects:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Project'
+ *                 count:
+ *                   type: number
+ *                   example: 5
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const getCurrentUserProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -65,7 +151,7 @@ export const getCurrentUserProjects = async (req: Request, res: Response): Promi
             return;
         }
 
-        // Get the user's MongoDB _id
+        // Get the user's Firestore _id
         const user = await UsersService.findUserByUserId(req.user.userId);
         if (!user || !user._id) {
             res.status(404).json({
@@ -90,9 +176,55 @@ export const getCurrentUserProjects = async (req: Request, res: Response): Promi
 };
 
 /**
- * Get a project by projectId
- * GET /api/v1/projects/:projectId
- * Protected: Requires authentication, user must be in project's users array
+ * @swagger
+ * /api/v1/projects/{projectId}:
+ *   get:
+ *     summary: Get a project by ID
+ *     description: Get a specific project by projectId. User must have access to the project.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     responses:
+ *       200:
+ *         description: Project retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const getProjectByProjectId = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -143,9 +275,64 @@ export const getProjectByProjectId = async (req: Request, res: Response): Promis
 };
 
 /**
- * Update a project by projectId
- * PUT /api/v1/projects/:projectId
- * Protected: Requires authentication, user must be admin or editor
+ * @swagger
+ * /api/v1/projects/{projectId}:
+ *   put:
+ *     summary: Update a project
+ *     description: Update a project by projectId. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProjectInput'
+ *     responses:
+ *       200:
+ *         description: Project updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Project updated successfully
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have permission to update this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const updateProject = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -207,9 +394,57 @@ export const updateProject = async (req: Request, res: Response): Promise<void> 
 };
 
 /**
- * Delete a project by projectId
- * DELETE /api/v1/projects/:projectId
- * Protected: Requires authentication, user must be admin
+ * @swagger
+ * /api/v1/projects/{projectId}:
+ *   delete:
+ *     summary: Delete a project
+ *     description: Delete a project by projectId. User must be admin.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     responses:
+ *       200:
+ *         description: Project deleted successfully, or project not found (returns 200 with message for both cases)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Project deleted successfully
+ *                   description: Either "Project deleted successfully" or "Project not found"
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins can delete projects
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const deleteProject = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -224,8 +459,8 @@ export const deleteProject = async (req: Request, res: Response): Promise<void> 
 
         const project = await ProjectsService.findProjectByProjectId(projectId);
         if (!project) {
-            res.status(404).json({
-                error: 'Project not found',
+            res.status(200).json({
+                message: 'Project not found',
             });
             return;
         }
@@ -250,8 +485,8 @@ export const deleteProject = async (req: Request, res: Response): Promise<void> 
         const deleted = await ProjectsService.deleteProject(projectId);
 
         if (!deleted) {
-            res.status(404).json({
-                error: 'Project not found',
+            res.status(200).json({
+                message: 'Project not found',
             });
             return;
         }
@@ -269,9 +504,58 @@ export const deleteProject = async (req: Request, res: Response): Promise<void> 
 };
 
 /**
- * Create a new API key for a project
- * POST /api/v1/projects/:projectId/api-keys
- * Protected: Requires authentication, user must be admin or editor
+ * @swagger
+ * /api/v1/projects/{projectId}/api-keys:
+ *   post:
+ *     summary: Create a new API key for a project
+ *     description: Create a new API key for a project. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     responses:
+ *       201:
+ *         description: API key created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: API key created successfully
+ *                 apiKey:
+ *                   $ref: '#/components/schemas/ProjectApiKey'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can create API keys
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const createProjectApiKey = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -332,9 +616,60 @@ export const createProjectApiKey = async (req: Request, res: Response): Promise<
 };
 
 /**
- * Get all API keys for a project
- * GET /api/v1/projects/:projectId/api-keys
- * Protected: Requires authentication, user must be admin or editor
+ * @swagger
+ * /api/v1/projects/{projectId}/api-keys:
+ *   get:
+ *     summary: Get all API keys for a project
+ *     description: Get all API keys for a project. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     responses:
+ *       200:
+ *         description: API keys retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 apiKeys:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ProjectApiKey'
+ *                 count:
+ *                   type: number
+ *                   example: 3
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can view API keys
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const getProjectApiKeys = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -395,9 +730,62 @@ export const getProjectApiKeys = async (req: Request, res: Response): Promise<vo
 };
 
 /**
- * Delete an API key from a project
- * DELETE /api/v1/projects/:projectId/api-keys/:apiKeyId
- * Protected: Requires authentication, user must be admin or editor
+ * @swagger
+ * /api/v1/projects/{projectId}/api-keys/{apiKeyId}:
+ *   delete:
+ *     summary: Delete an API key from a project
+ *     description: Delete an API key from a project. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: apiKeyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key ID
+ *     responses:
+ *       200:
+ *         description: API key deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: API key deleted successfully
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can delete API keys
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, API key, or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const deleteProjectApiKey = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -457,9 +845,84 @@ export const deleteProjectApiKey = async (req: Request, res: Response): Promise<
 };
 
 /**
- * Update a user's role on a project
- * PUT /api/v1/projects/:projectId/users/:userId/role
- * Protected: Requires authentication, current user must be admin on the project
+ * @swagger
+ * /api/v1/projects/{projectId}/users/{userId}/role:
+ *   put:
+ *     summary: Update a user's role on a project
+ *     description: Update a user's role on a project. Current user must be admin on the project. Admins cannot remove their own admin role.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User Firestore document ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [viewer, editor, admin]
+ *                 description: New role for the user
+ *                 example: editor
+ *     responses:
+ *       200:
+ *         description: User role updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: User role updated successfully
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       400:
+ *         description: Invalid role or admins cannot remove their own admin role
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only project admins can modify user roles
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, user, or user membership not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const updateUserRoleOnProject = async (req: Request, res: Response): Promise<void> => {
     try {

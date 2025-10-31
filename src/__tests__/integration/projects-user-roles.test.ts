@@ -116,10 +116,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should successfully update a user role from editor to admin as admin', async () => {
-            const editorObjectId = typeof editorUser._id === 'string' ? new ObjectId(editorUser._id) : editorUser._id;
+            if (!editorUser._id) {
+                throw new Error('Editor user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${editorObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${editorUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'admin' })
                 .expect(200);
@@ -128,22 +130,24 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify the role was updated to admin
             const updatedProject = await findProjectByProjectId(testProject.projectId);
-            const updatedUser = updatedProject?.users.find(u => u.id.toString() === editorObjectId.toString());
+            const updatedUser = updatedProject?.users.find(u => u.id === editorUser._id);
             expect(updatedUser?.role).toBe('admin');
         });
 
         it('should successfully downgrade a user from admin to editor as admin', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             // First upgrade viewer to admin
             await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'admin' });
 
             // Then downgrade to editor
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(200);
@@ -152,15 +156,17 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify the role is now editor
             const updatedProject = await findProjectByProjectId(testProject.projectId);
-            const updatedUser = updatedProject?.users.find(u => u.id.toString() === viewerObjectId.toString());
+            const updatedUser = updatedProject?.users.find(u => u.id === viewerUser._id);
             expect(updatedUser?.role).toBe('editor');
         });
 
         it('should return 401 without authentication', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .send({ role: 'editor' })
                 .expect(401);
 
@@ -169,10 +175,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 400 when role is not provided', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({})
                 .expect(400);
@@ -181,10 +189,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 400 when role is invalid', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'invalid-role' })
                 .expect(400);
@@ -204,10 +214,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 403 when non-admin tries to update roles', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(editorToken))
                 .send({ role: 'admin' })
                 .expect(403);
@@ -216,10 +228,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 403 when viewer tries to update roles', async () => {
-            const editorObjectId = typeof editorUser._id === 'string' ? new ObjectId(editorUser._id) : editorUser._id;
+            if (!editorUser._id) {
+                throw new Error('Editor user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${editorObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${editorUser._id}/role`)
                 .set('Authorization', createAuthHeader(viewerToken))
                 .send({ role: 'admin' })
                 .expect(403);
@@ -228,10 +242,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 403 when user not in project tries to update roles', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(otherUserToken))
                 .send({ role: 'editor' })
                 .expect(403);
@@ -240,10 +256,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 404 when project does not exist', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/non-existent-project/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/non-existent-project/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(404);
@@ -252,10 +270,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should return 404 when user is not a member of the project', async () => {
-            const otherObjectId = typeof otherUser._id === 'string' ? new ObjectId(otherUser._id) : otherUser._id;
+            if (!otherUser._id) {
+                throw new Error('Other user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${otherObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${otherUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(404);
@@ -264,10 +284,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should prevent admin from removing their own admin role', async () => {
-            const adminObjectId = typeof adminUser._id === 'string' ? new ObjectId(adminUser._id) : adminUser._id;
+            if (!adminUser._id) {
+                throw new Error('Admin user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${adminObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${adminUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(400);
@@ -276,22 +298,21 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify role is still admin
             const project = await findProjectByProjectId(testProject.projectId);
-            const admin = project?.users.find(u => u.id.toString() === adminObjectId.toString());
+            const admin = project?.users.find(u => u.id === adminUser._id);
             expect(admin?.role).toBe('admin');
         });
 
         it('should allow admin to change another admin role', async () => {
-            const editorObjectId = typeof editorUser._id === 'string' ? new ObjectId(editorUser._id) : editorUser._id;
 
             // First promote editor to admin
             await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${editorObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${editorUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'admin' });
 
             // Then demote that admin to editor
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${editorObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${editorUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(200);
@@ -300,18 +321,20 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify the role is now editor
             const project = await findProjectByProjectId(testProject.projectId);
-            const updatedUser = project?.users.find(u => u.id.toString() === editorObjectId.toString());
+            const updatedUser = project?.users.find(u => u.id === editorUser._id);
             expect(updatedUser?.role).toBe('editor');
         });
 
         it('should support all valid role values', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const roles = ['viewer', 'editor', 'admin'];
 
             for (const role of roles) {
                 const response = await request(app)
-                    .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                    .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                     .set('Authorization', createAuthHeader(adminToken))
                     .send({ role })
                     .expect(200);
@@ -320,13 +343,15 @@ describe('Project User Roles Integration Tests', () => {
 
                 // Verify the role was updated
                 const project = await findProjectByProjectId(testProject.projectId);
-                const updatedUser = project?.users.find(u => u.id.toString() === viewerObjectId.toString());
+                const updatedUser = project?.users.find(u => u.id === viewerUser._id);
                 expect(updatedUser?.role).toBe(role);
             }
         });
 
         it('should update updatedAt timestamp when role changes', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
+            if (!viewerUser._id) {
+                throw new Error('Viewer user _id is required');
+            }
 
             const projectBefore = await findProjectByProjectId(testProject.projectId);
             const updatedAtBefore = projectBefore?.updatedAt;
@@ -335,7 +360,7 @@ describe('Project User Roles Integration Tests', () => {
             await new Promise(resolve => setTimeout(resolve, 10));
 
             await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'admin' });
 
@@ -347,10 +372,12 @@ describe('Project User Roles Integration Tests', () => {
         });
 
         it('should allow admin to promote admin to admin (no change)', async () => {
-            const adminObjectId = typeof adminUser._id === 'string' ? new ObjectId(adminUser._id) : adminUser._id;
+            if (!adminUser._id) {
+                throw new Error('Admin user _id is required');
+            }
 
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${adminObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${adminUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'admin' })
                 .expect(200);
@@ -359,7 +386,7 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify role is still admin
             const project = await findProjectByProjectId(testProject.projectId);
-            const admin = project?.users.find(u => u.id.toString() === adminObjectId.toString());
+            const admin = project?.users.find(u => u.id === adminUser._id);
             expect(admin?.role).toBe('admin');
         });
     });

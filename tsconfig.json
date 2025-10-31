@@ -13,7 +13,16 @@
     "moduleResolution": "node",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "inlineSourceMap": false,
+    "sourceRoot": ""
+  },
+  "ts-node": {
+    "files": true,
+    "compilerOptions": {
+      "sourceMap": true,
+      "inlineSourceMap": false
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

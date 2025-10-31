@@ -247,7 +247,7 @@ async function getLogsByProjectIdFromFirestore(
         query = query.where('environment', '==', environment);
     }
 
-    // Note: Firestore doesn't support regex/text search like MongoDB
+    // Note: Firestore doesn't support regex/text search, so we use Typesense for search
     // Message search would need to be handled by Typesense or client-side filtering
     if (message) {
         console.warn('Message search is not supported in Firestore. Use Typesense for full-text search.');
