@@ -1,6 +1,5 @@
-import { ObjectId, WithId } from 'mongodb';
 import { randomBytes, randomUUID } from 'crypto';
-import { getDatabase } from '../database/connection';
+import { getFirestore, serverTimestamp, arrayUnion, arrayRemove } from '../database/firestore.connection';
 import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
 import { getCache, setCache } from './redis.service';
@@ -11,40 +10,41 @@ const COLLECTION_NAME = 'projects';
  * Get the projects collection
  */
 function getProjectsCollection() {
-    const db = getDatabase();
+    const db = getFirestore();
     if (!db) {
-        throw new Error('Database not connected');
+        throw new Error('Firestore not connected');
     }
-    return db.collection<Project>(COLLECTION_NAME);
+    return db.collection(COLLECTION_NAME);
 }
 
 /**
- * Convert MongoDB document to Project type
+ * Convert Firestore document to Project type
  */
-function toProject(doc: WithId<Project> | null): Project | null {
-    if (!doc) return null;
-    const project = { ...doc } as Project;
-    project._id = doc._id.toString();
-    return project;
+function toProject(doc: FirebaseFirestore.DocumentSnapshot): Project | null {
+    if (!doc.exists) return null;
+
+    const data = doc.data()!;
+    return {
+        ...data,
+        _id: doc.id,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        updatedAt: data.updatedAt?.toDate() || new Date(),
+        apiKeys: data.apiKeys?.map((key: any) => ({
+            ...key,
+            createdAt: key.createdAt?.toDate() || new Date(),
+        })) || [],
+    } as Project;
 }
 
 /**
  * Create indexes for the projects collection
- * Should be called once on application startup
+ * Firestore creates indexes automatically, but we can create composite indexes if needed
+ * For now, single-field indexes are auto-created
  */
 export async function createProjectIndexes(): Promise<void> {
-    try {
-        const collection = getProjectsCollection();
-
-        await collection.createIndex({ projectId: 1 }, { unique: true });
-        await collection.createIndex({ 'users.id': 1 });
-        await collection.createIndex({ 'apiKeys.key': 1 });
-
-        console.log('✅ Project indexes created');
-    } catch (error) {
-        console.error('❌ Failed to create project indexes:', error);
-        throw error;
-    }
+    // Firestore auto-creates single-field indexes
+    // Composite indexes would be defined in firestore.indexes.json if needed
+    console.log('✅ Firestore auto-creates indexes for projects collection');
 }
 
 /**
@@ -69,10 +69,10 @@ export async function generateUniqueProjectId(name: string): Promise<string> {
 /**
  * Create a new project
  * @param projectData - Project data to create
- * @param creatorUserId - MongoDB ObjectId of the user creating the project
+ * @param creatorUserId - Document ID of the user creating the project
  * @returns Created project document
  */
-export async function createProject(projectData: CreateProjectInput, creatorUserId: ObjectId): Promise<Project> {
+export async function createProject(projectData: CreateProjectInput, creatorUserId: string): Promise<Project> {
     const collection = getProjectsCollection();
 
     // Generate unique projectId from name
@@ -85,7 +85,7 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
     };
 
     const now = new Date();
-    const project: Project = {
+    const project: Omit<Project, '_id'> = {
         name: projectData.name,
         description: projectData.description,
         projectId,
@@ -94,18 +94,10 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
         updatedAt: now,
     };
 
-    const result = await collection.insertOne(project);
+    const docRef = await collection.add(project);
+    const doc = await docRef.get();
 
-    if (!result.insertedId) {
-        throw new Error('Failed to create project');
-    }
-
-    const createdProject = await collection.findOne({ _id: result.insertedId });
-    if (!createdProject) {
-        throw new Error('Failed to retrieve created project');
-    }
-
-    return toProject(createdProject)!;
+    return toProject(doc)!;
 }
 
 /**
@@ -115,38 +107,51 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
  */
 export async function findProjectByProjectId(projectId: string): Promise<Project | null> {
     const collection = getProjectsCollection();
-    const project = await collection.findOne({ projectId });
-    return toProject(project);
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    return toProject(snapshot.docs[0]);
 }
 
 /**
- * Find a project by MongoDB _id
- * @param id - MongoDB ObjectId string
+ * Find a project by Firestore document _id
+ * @param id - Firestore document ID string
  * @returns Project document or null
  */
 export async function findProjectById(id: string): Promise<Project | null> {
     const collection = getProjectsCollection();
-
-    if (!ObjectId.isValid(id)) {
-        return null;
-    }
-
-    const project = await collection.findOne({ _id: new ObjectId(id) });
-    return toProject(project);
+    const doc = await collection.doc(id).get();
+    return toProject(doc);
 }
 
 /**
  * Get all projects for a specific user
- * @param userId - MongoDB ObjectId of the user
+ * @param userId - Document ID of the user
  * @returns Array of project documents
  */
-export async function getProjectsByUserId(userId: ObjectId): Promise<Project[]> {
+export async function getProjectsByUserId(userId: string): Promise<Project[]> {
     const collection = getProjectsCollection();
-    const projects = await collection
-        .find({ 'users.id': userId })
-        .sort({ createdAt: -1 })
-        .toArray();
-    return projects.map(project => toProject(project)!);
+    const snapshot = await collection
+        .where('users', 'array-contains', { id: userId, role: 'admin' })
+        .orderBy('createdAt', 'desc')
+        .get();
+
+    // Note: array-contains doesn't work with objects that have different values
+    // We need to query all projects and filter manually
+    const allSnapshot = await collection.orderBy('createdAt', 'desc').get();
+    const projects: Project[] = [];
+
+    for (const doc of allSnapshot.docs) {
+        const project = toProject(doc);
+        if (project && project.users.some(u => u.id === userId)) {
+            projects.push(project);
+        }
+    }
+
+    return projects;
 }
 
 /**
@@ -157,13 +162,16 @@ export async function getProjectsByUserId(userId: ObjectId): Promise<Project[]> 
  */
 export async function getAllProjects(limit: number = 100, skip: number = 0): Promise<Project[]> {
     const collection = getProjectsCollection();
-    const projects = await collection
-        .find({})
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .skip(skip)
-        .toArray();
-    return projects.map(project => toProject(project)!);
+
+    let query = collection.orderBy('createdAt', 'desc').limit(limit);
+
+    // Firestore doesn't have skip, but we can use offset
+    if (skip > 0) {
+        query = query.offset(skip);
+    }
+
+    const snapshot = await query.get();
+    return snapshot.docs.map(doc => toProject(doc)!).filter(Boolean);
 }
 
 /**
@@ -175,18 +183,22 @@ export async function getAllProjects(limit: number = 100, skip: number = 0): Pro
 export async function updateProject(projectId: string, updateData: UpdateProjectInput): Promise<Project | null> {
     const collection = getProjectsCollection();
 
-    const updatedData: Partial<Project> = {
+    // Find the document first
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+
+    await docRef.update({
         ...updateData,
         updatedAt: new Date(),
-    };
+    });
 
-    const result = await collection.findOneAndUpdate(
-        { projectId },
-        { $set: updatedData },
-        { returnDocument: 'after' }
-    );
-
-    return toProject(result);
+    const updatedDoc = await docRef.get();
+    return toProject(updatedDoc);
 }
 
 /**
@@ -196,8 +208,14 @@ export async function updateProject(projectId: string, updateData: UpdateProject
  */
 export async function deleteProject(projectId: string): Promise<boolean> {
     const collection = getProjectsCollection();
-    const result = await collection.deleteOne({ projectId });
-    return result.deletedCount === 1;
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return false;
+    }
+
+    await snapshot.docs[0].ref.delete();
+    return true;
 }
 
 /**
@@ -213,14 +231,39 @@ export async function projectIdExists(projectId: string): Promise<boolean> {
 /**
  * Remove a user from all projects
  * Called when a user is deleted
- * @param userId - MongoDB ObjectId of the user to remove
+ * @param userId - Document ID of the user to remove
  */
-export async function removeUserFromAllProjects(userId: ObjectId): Promise<void> {
+export async function removeUserFromAllProjects(userId: string): Promise<void> {
     const collection = getProjectsCollection();
-    await collection.updateMany(
-        { 'users.id': userId },
-        { $pull: { users: { id: userId } } }
-    );
+
+    // Get all projects
+    const snapshot = await collection.get();
+
+    // Update each project that has this user
+    const batch = getFirestore()!.batch();
+    let batchCount = 0;
+
+    for (const doc of snapshot.docs) {
+        const project = toProject(doc);
+        if (project && project.users.some(u => u.id === userId)) {
+            const updatedUsers = project.users.filter(u => u.id !== userId);
+            batch.update(doc.ref, {
+                users: updatedUsers,
+                updatedAt: new Date(),
+            });
+            batchCount++;
+
+            // Firestore batch limit is 500 operations
+            if (batchCount >= 500) {
+                await batch.commit();
+                batchCount = 0;
+            }
+        }
+    }
+
+    if (batchCount > 0) {
+        await batch.commit();
+    }
 }
 
 /**
@@ -246,6 +289,14 @@ function generateApiKey(length: number = 40): string {
 export async function createProjectApiKey(projectId: string): Promise<ProjectApiKey | null> {
     const collection = getProjectsCollection();
 
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
     const apiKeyString = generateApiKey();
     const apiKeyId = randomUUID();
     const now = new Date();
@@ -257,27 +308,13 @@ export async function createProjectApiKey(projectId: string): Promise<ProjectApi
         constraints: {},
     };
 
-    const result = await collection.findOneAndUpdate(
-        { projectId },
-        {
-            $push: { apiKeys: newApiKey },
-            $set: { updatedAt: now },
-        },
-        { returnDocument: 'after' }
-    );
+    // Add to apiKeys array
+    await docRef.update({
+        apiKeys: arrayUnion(newApiKey),
+        updatedAt: now,
+    });
 
-    if (!result) {
-        return null;
-    }
-
-    // Find the newly created API key in the updated project
-    const project = toProject(result);
-    if (!project || !project.apiKeys) {
-        return null;
-    }
-
-    const createdApiKey = project.apiKeys.find(ak => ak.id === apiKeyId);
-    return createdApiKey || null;
+    return newApiKey;
 }
 
 /**
@@ -302,28 +339,33 @@ export async function getProjectApiKeys(projectId: string): Promise<ProjectApiKe
 export async function deleteProjectApiKey(projectId: string, apiKeyId: string): Promise<boolean> {
     const collection = getProjectsCollection();
 
-    // First check if the project exists and if the API key exists
-    const project = await findProjectByProjectId(projectId);
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return false;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
     if (!project) {
         return false;
     }
 
-    const apiKeyExists = project.apiKeys?.some(ak => ak.id === apiKeyId);
-    if (!apiKeyExists) {
+    // Find the API key to remove
+    const apiKeyToRemove = project.apiKeys?.find(ak => ak.id === apiKeyId);
+    if (!apiKeyToRemove) {
         return false;
     }
 
-    const now = new Date();
-    const result = await collection.findOneAndUpdate(
-        { projectId },
-        {
-            $pull: { apiKeys: { id: apiKeyId } },
-            $set: { updatedAt: now },
-        },
-        { returnDocument: 'after' }
-    );
+    // Remove from apiKeys array
+    await docRef.update({
+        apiKeys: arrayRemove(apiKeyToRemove),
+        updatedAt: new Date(),
+    });
 
-    return result !== null;
+    return true;
 }
 
 /**
@@ -340,53 +382,64 @@ export async function findProjectByApiKey(apiKey: string): Promise<Project | nul
     }
 
     const collection = getProjectsCollection();
-    const project = await collection.findOne({ 'apiKeys.key': apiKey });
-    const result = toProject(project);
 
-    if (result) {
-        await setCache(cacheKey, result, 300); // 5-minute cache
+    // Get all projects and search for the API key
+    // Note: Firestore doesn't support deep array queries easily
+    const snapshot = await collection.get();
+
+    for (const doc of snapshot.docs) {
+        const project = toProject(doc);
+        if (project && project.apiKeys?.some(ak => ak.key === apiKey)) {
+            await setCache(cacheKey, project, 300); // 5-minute cache
+            return project;
+        }
     }
 
-    return result;
+    return null;
 }
 
 /**
  * Update a user's role on a project
  * @param projectId - The unique projectId identifier
- * @param userId - MongoDB ObjectId of the user whose role will be updated
+ * @param userId - Document ID of the user whose role will be updated
  * @param newRole - The new role to assign ('viewer' | 'editor' | 'admin')
  * @returns Updated project document or null if project or user not found
  */
 export async function updateUserRoleOnProject(
     projectId: string,
-    userId: ObjectId,
+    userId: string,
     newRole: 'viewer' | 'editor' | 'admin'
 ): Promise<Project | null> {
     const collection = getProjectsCollection();
 
-    // Verify the user exists on the project first
-    const project = await findProjectByProjectId(projectId);
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
     if (!project) {
         return null;
     }
 
-    const userExists = project.users.some(pu => pu.id.toString() === userId.toString());
-    if (!userExists) {
+    // Find and update the user
+    const userIndex = project.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) {
         return null;
     }
 
-    const now = new Date();
-    const result = await collection.findOneAndUpdate(
-        { projectId, 'users.id': userId },
-        {
-            $set: {
-                'users.$.role': newRole,
-                updatedAt: now,
-            },
-        },
-        { returnDocument: 'after' }
-    );
+    const updatedUsers = [...project.users];
+    updatedUsers[userIndex] = { ...updatedUsers[userIndex], role: newRole };
 
-    return toProject(result);
+    await docRef.update({
+        users: updatedUsers,
+        updatedAt: new Date(),
+    });
+
+    const updatedDoc = await docRef.get();
+    return toProject(updatedDoc);
 }
-

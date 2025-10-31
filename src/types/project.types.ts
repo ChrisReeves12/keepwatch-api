@@ -1,10 +1,8 @@
-import { ObjectId } from 'mongodb';
-
 /**
  * Project user with role
  */
 export interface ProjectUser {
-    id: ObjectId;
+    id: string; // Firestore document ID
     role: 'viewer' | 'editor' | 'admin';
 }
 
@@ -19,13 +17,13 @@ export interface ProjectApiKey {
 }
 
 /**
- * Project interface representing a project document in MongoDB
+ * Project interface representing a project document in Firestore
  */
 export interface Project {
-    _id?: ObjectId | string;
+    _id?: string; // Firestore document ID
     name: string;
     description?: string;
-    projectId: string;
+    projectId: string; // User-friendly slug identifier
     users: ProjectUser[];
     apiKeys?: ProjectApiKey[];
     createdAt: Date;
@@ -48,4 +46,3 @@ export interface UpdateProjectInput {
     description?: string;
     users?: ProjectUser[];
 }
-

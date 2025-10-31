@@ -1,4 +1,3 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { setupTestDatabase, cleanupTestDatabase, closeTestDatabase } from './helpers/db.helper';
 
 // Replace Redis client with in-memory mock implementation for tests
@@ -120,21 +119,16 @@ jest.mock('typesense', () => {
     return { Client: MockTypesenseClient };
 });
 
-let mongoServer: MongoMemoryServer | null = null;
-
 /**
  * Global test setup - runs before all tests
  */
 beforeAll(async () => {
-    if (!mongoServer) {
-        mongoServer = await MongoMemoryServer.create();
-        process.env.MONGODB_CONNECTION_STRING = mongoServer.getUri('keepwatch-test');
-    }
-
+    // Set Firestore emulator host for tests
+    // Make sure the Firestore emulator is running via docker-compose
+    process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8080';
+    process.env.GOOGLE_CLOUD_PROJECT = 'keepwatch-test';
+    
     // Set test environment variables if not already set
-    if (!process.env.MONGODB_CONNECTION_STRING) {
-        process.env.MONGODB_CONNECTION_STRING = 'mongodb://admin:password@localhost:27017/keepwatch-test?authSource=admin';
-    }
     if (!process.env.TYPESENSE_HOST) {
         process.env.TYPESENSE_HOST = 'localhost';
     }
@@ -179,9 +173,4 @@ afterEach(async () => {
  */
 afterAll(async () => {
     await closeTestDatabase();
-    if (mongoServer) {
-        await mongoServer.stop();
-        mongoServer = null;
-    }
 });
-

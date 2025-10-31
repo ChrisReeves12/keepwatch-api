@@ -1,7 +1,7 @@
 import express, { Express } from 'express';
 import dotenv from 'dotenv';
 import v1Routes from './routes/v1routes';
-import { connectToDatabase, closeDatabaseConnection } from './database/connection';
+import { connectToFirestore, closeFirestoreConnection } from './database/firestore.connection';
 import { createUserIndexes } from './services/users.service';
 import { createProjectIndexes } from './services/projects.service';
 import { createLogIndexes } from './services/logs.service';
@@ -24,8 +24,8 @@ app.use('/api/v1', v1Routes);
 // Start server
 async function startServer() {
     try {
-        // Connect to MongoDB before starting the server
-        await connectToDatabase();
+        // Connect to Firestore before starting the server
+        await connectToFirestore();
         await createUserIndexes();
         await createProjectIndexes();
         await createLogIndexes();
@@ -55,14 +55,14 @@ async function startServer() {
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
     console.log('\nShutting down gracefully...');
-    await closeDatabaseConnection();
+    await closeFirestoreConnection();
     await closeRedisConnection();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     console.log('\nShutting down gracefully...');
-    await closeDatabaseConnection();
+    await closeFirestoreConnection();
     await closeRedisConnection();
     process.exit(0);
 });

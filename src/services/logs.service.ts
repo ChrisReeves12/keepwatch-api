@@ -1,6 +1,5 @@
-import { ObjectId, WithId } from 'mongodb';
 import { randomUUID } from 'crypto';
-import { getDatabase } from '../database/connection';
+import { getFirestore } from '../database/firestore.connection';
 import { Log, CreateLogInput } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId } from './projects.service';
@@ -11,51 +10,35 @@ const COLLECTION_NAME = 'logs';
  * Get the logs collection
  */
 function getLogsCollection() {
-    const db = getDatabase();
+    const db = getFirestore();
     if (!db) {
-        throw new Error('Database not connected');
+        throw new Error('Firestore not connected');
     }
-    return db.collection<Log>(COLLECTION_NAME);
+    return db.collection(COLLECTION_NAME);
 }
 
 /**
- * Convert MongoDB document to Log type
+ * Convert Firestore document to Log type
  */
-function toLog(doc: WithId<Log> | null): Log | null {
-    if (!doc) return null;
-    const log = { ...doc } as Log;
-    log._id = doc._id.toString();
-    return log;
+function toLog(doc: FirebaseFirestore.DocumentSnapshot): Log | null {
+    if (!doc.exists) return null;
+    
+    const data = doc.data()!;
+    return {
+        ...data,
+        _id: doc.id,
+        createdAt: data.createdAt?.toDate() || new Date(),
+    } as Log;
 }
 
 /**
  * Create indexes for the logs collection
- * Should be called once on application startup
+ * Firestore creates indexes automatically for single fields
  */
 export async function createLogIndexes(): Promise<void> {
-    try {
-        const collection = getLogsCollection();
-
-        // Create index on projectId for faster lookups
-        await collection.createIndex({ projectId: 1 });
-
-        // Create index on projectObjectId for faster lookups
-        await collection.createIndex({ projectObjectId: 1 });
-
-        // Create compound index for common queries (projectId, timestampMS descending)
-        await collection.createIndex({ projectId: 1, timestampMS: -1 });
-
-        // Create index on level for filtering
-        await collection.createIndex({ level: 1 });
-
-        // Create index on environment for filtering
-        await collection.createIndex({ environment: 1 });
-
-        console.log('✅ Log indexes created');
-    } catch (error) {
-        console.error('❌ Failed to create log indexes:', error);
-        throw error;
-    }
+    // Firestore auto-creates single-field indexes
+    // Composite indexes for common queries would be defined in firestore.indexes.json
+    console.log('✅ Firestore auto-creates indexes for logs collection');
 }
 
 /**
@@ -66,20 +49,20 @@ export async function createLogIndexes(): Promise<void> {
 export async function createLog(logData: CreateLogInput): Promise<Log> {
     const collection = getLogsCollection();
 
-    // Look up project by projectId (string slug) to get its MongoDB _id
+    // Look up project by projectId (string slug) to get its document ID
     const project = await findProjectByProjectId(logData.projectId);
     if (!project || !project._id) {
         throw new Error('Project not found');
     }
 
-    const projectObjectId = typeof project._id === 'string' ? new ObjectId(project._id) : project._id;
+    const projectDocId = typeof project._id === 'string' ? project._id : project._id;
 
     const now = new Date();
-    const log: Log = {
+    const log: Omit<Log, '_id'> = {
         level: logData.level,
         environment: logData.environment,
         projectId: logData.projectId,
-        projectObjectId,
+        projectObjectId: projectDocId, // Store the Firestore document ID
         message: logData.message,
         stackTrace: logData.stackTrace || [],
         details: logData.details || {},
@@ -87,18 +70,10 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
         createdAt: now,
     };
 
-    const result = await collection.insertOne(log);
+    const docRef = await collection.add(log);
+    const doc = await docRef.get();
 
-    if (!result.insertedId) {
-        throw new Error('Failed to create log');
-    }
-
-    const createdLog = await collection.findOne({ _id: result.insertedId });
-    if (!createdLog) {
-        throw new Error('Failed to retrieve created log');
-    }
-
-    return toLog(createdLog)!;
+    return toLog(doc)!;
 }
 
 /**
@@ -108,19 +83,19 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
  * @returns Log object
  */
 async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
-    // Look up project to get its MongoDB _id
+    // Look up project to get its document ID
     const project = await findProjectByProjectId(doc.projectId || projectId);
     if (!project || !project._id) {
         throw new Error(`Project not found: ${doc.projectId || projectId}`);
     }
 
-    const projectObjectId = typeof project._id === 'string' ? new ObjectId(project._id) : project._id;
+    const projectDocId = typeof project._id === 'string' ? project._id : project._id;
 
     return {
         level: doc.level,
         environment: doc.environment,
         projectId: doc.projectId || projectId,
-        projectObjectId,
+        projectObjectId: projectDocId,
         message: doc.message,
         stackTrace: doc.stackTrace || [],
         details: doc.details || {},
@@ -148,7 +123,7 @@ export async function getLogsByProjectId(
     message?: string
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
     if (!isTypesenseEnabled()) {
-        return getLogsByProjectIdFromMongo(projectId, page, pageSize, level, environment, message);
+        return getLogsByProjectIdFromFirestore(projectId, page, pageSize, level, environment, message);
     }
 
     const typesenseClient = getTypesenseClient();
@@ -203,19 +178,14 @@ export async function getLogsByProjectId(
 }
 
 /**
- * Get a log by MongoDB _id
- * @param id - MongoDB ObjectId string
+ * Get a log by Firestore document _id
+ * @param id - Firestore document ID string
  * @returns Log document or null
  */
 export async function findLogById(id: string): Promise<Log | null> {
     const collection = getLogsCollection();
-
-    if (!ObjectId.isValid(id)) {
-        return null;
-    }
-
-    const log = await collection.findOne({ _id: new ObjectId(id) });
-    return toLog(log);
+    const doc = await collection.doc(id).get();
+    return toLog(doc);
 }
 
 /**
@@ -231,7 +201,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
         const typesenseClient = getTypesenseClient();
 
         // Convert log to Typesense document format
-        // Generate a UUID for the Typesense document ID (we don't use MongoDB _id)
+        // Generate a UUID for the Typesense document ID (we don't use Firestore _id)
         const document = {
             id: randomUUID(),
             level: logData.level,
@@ -253,7 +223,10 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
     }
 }
 
-async function getLogsByProjectIdFromMongo(
+/**
+ * Get logs from Firestore (fallback when Typesense is not enabled)
+ */
+async function getLogsByProjectIdFromFirestore(
     projectId: string,
     page: number,
     pageSize: number,
@@ -263,31 +236,39 @@ async function getLogsByProjectIdFromMongo(
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
     const collection = getLogsCollection();
 
-    const query: Record<string, any> = { projectId };
+    // Build query
+    let query: FirebaseFirestore.Query = collection.where('projectId', '==', projectId);
 
     if (level) {
-        query.level = level;
+        query = query.where('level', '==', level);
     }
 
     if (environment) {
-        query.environment = environment;
+        query = query.where('environment', '==', environment);
     }
 
+    // Note: Firestore doesn't support regex/text search like MongoDB
+    // Message search would need to be handled by Typesense or client-side filtering
     if (message) {
-        query.message = { $regex: message, $options: 'i' };
+        console.warn('Message search is not supported in Firestore. Use Typesense for full-text search.');
     }
 
-    const total = await collection.countDocuments(query);
+    // Get total count (this requires a separate query)
+    const countSnapshot = await query.get();
+    const total = countSnapshot.size;
     const totalPages = Math.ceil(total / pageSize);
 
-    const logsCursor = collection
-        .find(query)
-        .sort({ timestampMS: -1 })
-        .skip((page - 1) * pageSize)
-        .limit(pageSize);
+    // Get paginated results
+    query = query.orderBy('timestampMS', 'desc');
+    
+    if (page > 1) {
+        query = query.offset((page - 1) * pageSize);
+    }
+    
+    query = query.limit(pageSize);
 
-    const documents = await logsCursor.toArray();
-    const logs = documents.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
+    const snapshot = await query.get();
+    const logs = snapshot.docs.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
 
     return {
         logs,
@@ -297,4 +278,3 @@ async function getLogsByProjectIdFromMongo(
         totalPages,
     };
 }
-

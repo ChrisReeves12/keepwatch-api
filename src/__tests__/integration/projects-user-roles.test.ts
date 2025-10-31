@@ -1,9 +1,8 @@
 import request from 'supertest';
-import { ObjectId } from 'mongodb';
 import { createTestApp } from '../helpers/test-app.helper';
 import { createTestToken, createAuthHeader } from '../helpers/auth.helper';
 import { createTestUser, createTestProject } from '../helpers/db.helper';
-import { getDatabase } from '../../database/connection';
+import { getFirestore } from '../../database/firestore.connection';
 import { findProjectByProjectId } from '../../services/projects.service';
 import { ProjectUser } from '../../types/project.types';
 
@@ -32,13 +31,12 @@ describe('Project User Roles Integration Tests', () => {
         });
         adminToken = createTestToken(adminUser.userId, adminUser.email);
 
-        const adminObjectId = typeof adminUser._id === 'string' ? new ObjectId(adminUser._id) : adminUser._id;
         testProject = await createTestProject(
             {
                 name: `Test Project ${timestamp} ${randomSuffix}`,
                 description: 'A test project',
             },
-            adminObjectId
+            adminUser._id
         );
 
         // Create editor user
@@ -66,46 +64,44 @@ describe('Project User Roles Integration Tests', () => {
         otherUserToken = createTestToken(otherUser.userId, otherUser.email);
 
         // Add editor and viewer users to the project
-        const db = getDatabase();
+        const db = getFirestore();
         if (!db) {
-            throw new Error('Database not connected');
+            throw new Error('Firestore not connected');
         }
 
         const projectsCollection = db.collection('projects');
-        const editorObjectId = typeof editorUser._id === 'string' ? new ObjectId(editorUser._id) : editorUser._id;
-        const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
 
         const editorProjectUser: ProjectUser = {
-            id: editorObjectId,
+            id: editorUser._id,
             role: 'editor',
         };
 
         const viewerProjectUser: ProjectUser = {
-            id: viewerObjectId,
+            id: viewerUser._id,
             role: 'viewer',
         };
 
         // Fetch the project, update users array, and save
-        const project = await projectsCollection.findOne({ projectId: testProject.projectId });
-        if (project) {
+        const snapshot = await projectsCollection.where('projectId', '==', testProject.projectId).limit(1).get();
+        if (!snapshot.empty) {
+            const projectDoc = snapshot.docs[0];
+            const project = projectDoc.data();
             const updatedUsers = [
                 ...(project.users || []),
                 editorProjectUser,
                 viewerProjectUser,
             ];
-            await projectsCollection.updateOne(
-                { projectId: testProject.projectId },
-                { $set: { users: updatedUsers } }
-            );
+            await projectDoc.ref.update({
+                users: updatedUsers,
+                updatedAt: new Date(),
+            });
         }
     });
 
     describe('PUT /api/v1/projects/:projectId/users/:userId/role', () => {
         it('should successfully update a user role from viewer to editor as admin', async () => {
-            const viewerObjectId = typeof viewerUser._id === 'string' ? new ObjectId(viewerUser._id) : viewerUser._id;
-
             const response = await request(app)
-                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerObjectId.toString()}/role`)
+                .put(`/api/v1/projects/${testProject.projectId}/users/${viewerUser._id}/role`)
                 .set('Authorization', createAuthHeader(adminToken))
                 .send({ role: 'editor' })
                 .expect(200);
@@ -115,7 +111,7 @@ describe('Project User Roles Integration Tests', () => {
 
             // Verify the role was actually updated
             const updatedProject = await findProjectByProjectId(testProject.projectId);
-            const updatedUser = updatedProject?.users.find(u => u.id.toString() === viewerObjectId.toString());
+            const updatedUser = updatedProject?.users.find(u => u.id === viewerUser._id);
             expect(updatedUser?.role).toBe('editor');
         });
 

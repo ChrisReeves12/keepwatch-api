@@ -1,15 +1,12 @@
-import { ObjectId } from 'mongodb';
-
 /**
- * User interface representing a user document in MongoDB
- * Note: _id is handled separately by MongoDB as ObjectId
+ * User interface representing a user document in Firestore
  */
 export interface User {
-    _id?: ObjectId | string;
+    _id?: string; // Firestore document ID
     name: string;
     email: string;
     password: string;
-    userId: string; // Unique machine-readable identifier
+    userId: string; // Unique machine-readable identifier (slug)
     company?: string;
     createdAt: Date;
     updatedAt: Date;
@@ -34,4 +31,3 @@ export interface UpdateUserInput {
     password?: string;
     company?: string;
 }
-

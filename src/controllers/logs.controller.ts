@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ObjectId } from 'mongodb';
 import * as LogsService from '../services/logs.service';
 import * as ProjectsService from '../services/projects.service';
 import * as UsersService from '../services/users.service';
@@ -119,11 +118,7 @@ export const getLogsByProjectId = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const hasAccess = project.users.some(pu => pu.id.toString() === userObjectId.toString());
+        const hasAccess = project.users.some(pu => pu.id === user._id);
         if (!hasAccess) {
             res.status(403).json({
                 error: 'Forbidden: You do not have access to this project',

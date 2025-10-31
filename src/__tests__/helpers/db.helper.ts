@@ -1,5 +1,4 @@
-import { ObjectId } from 'mongodb';
-import { connectToDatabase, getDatabase, closeDatabaseConnection } from '../../database/connection';
+import { connectToFirestore, getFirestore, closeFirestoreConnection } from '../../database/firestore.connection';
 import { createUserIndexes, createUser } from '../../services/users.service';
 import { createProjectIndexes, createProject } from '../../services/projects.service';
 import { createLogIndexes } from '../../services/logs.service';
@@ -11,7 +10,7 @@ import { Project, CreateProjectInput } from '../../types/project.types';
  * Setup test database connection and indexes
  */
 export async function setupTestDatabase(): Promise<void> {
-    await connectToDatabase();
+    await connectToFirestore();
     await createUserIndexes();
     await createProjectIndexes();
     await createLogIndexes();
@@ -19,18 +18,38 @@ export async function setupTestDatabase(): Promise<void> {
 }
 
 /**
- * Cleanup test database by dropping all collections
+ * Cleanup test database by deleting all documents from all collections
  */
 export async function cleanupTestDatabase(): Promise<void> {
-    const db = getDatabase();
+    const db = getFirestore();
     if (!db) {
         return;
     }
 
-    // Clean MongoDB collections
-    const collections = await db.listCollections().toArray();
-    for (const collection of collections) {
-        await db.collection(collection.name).deleteMany({});
+    // Clean Firestore collections
+    const collections = ['users', 'projects', 'logs'];
+    
+    for (const collectionName of collections) {
+        const snapshot = await db.collection(collectionName).get();
+        
+        // Delete documents in batches
+        const batch = db.batch();
+        let batchCount = 0;
+        
+        for (const doc of snapshot.docs) {
+            batch.delete(doc.ref);
+            batchCount++;
+            
+            // Firestore batch limit is 500 operations
+            if (batchCount >= 500) {
+                await batch.commit();
+                batchCount = 0;
+            }
+        }
+        
+        if (batchCount > 0) {
+            await batch.commit();
+        }
     }
 
     // Clean Typesense collection
@@ -75,7 +94,7 @@ export async function cleanupTestDatabase(): Promise<void> {
  * Close test database connection
  */
 export async function closeTestDatabase(): Promise<void> {
-    await closeDatabaseConnection();
+    await closeFirestoreConnection();
 }
 
 /**
@@ -90,10 +109,9 @@ export async function createTestUser(userData: CreateUserInput): Promise<User> {
 /**
  * Create a test project with a user as admin
  * @param projectData - Project data
- * @param userId - MongoDB ObjectId of the user to add as admin
+ * @param userId - Firestore document ID of the user to add as admin
  * @returns Created project
  */
-export async function createTestProject(projectData: CreateProjectInput, userId: ObjectId): Promise<Project> {
+export async function createTestProject(projectData: CreateProjectInput, userId: string): Promise<Project> {
     return await createProject(projectData, userId);
 }
-

@@ -1,22 +1,6 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:7.0
-    container_name: keepwatch-mongodb
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password
-      MONGO_INITDB_DATABASE: keepwatch
-    volumes:
-      - mongodb_data:/data/db
-      - mongodb_config:/data/configdb
-    networks:
-      - keepwatch-network
-
   typesense:
     image: typesense/typesense:0.25.2
     container_name: keepwatch-typesense
@@ -32,12 +16,23 @@ services:
     networks:
       - keepwatch-network
 
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    container_name: keepwatch-firestore
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # Firestore emulator API port (no web UI with gcloud emulator)
+    command: >
+      gcloud emulators firestore start --host-port=0.0.0.0:8080
+    environment:
+      FIRESTORE_PROJECT_ID: keepwatch-dev
+    networks:
+      - keepwatch-network
+
 volumes:
-  mongodb_data:
-  mongodb_config:
   typesense-data:
+
 
 networks:
   keepwatch-network:
     driver: bridge
-

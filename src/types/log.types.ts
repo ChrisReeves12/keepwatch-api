@@ -1,14 +1,12 @@
-import { ObjectId } from 'mongodb';
-
 /**
- * Log interface representing a log document in MongoDB
+ * Log interface representing a log document in Firestore
  */
 export interface Log {
-    _id?: ObjectId | string;
+    _id?: string; // Firestore document ID
     level: string;
     environment: string;
-    projectId: string;
-    projectObjectId: ObjectId;
+    projectId: string; // Project slug identifier
+    projectObjectId: string; // Firestore document ID of the project
     message: string;
     stackTrace: Array<Record<string, any>>;
     details: Record<string, any>;
@@ -38,4 +36,3 @@ export interface LogQueryParams {
     level?: string;
     environment?: string;
 }
-

@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ObjectId } from 'mongodb';
 import * as ProjectsService from '../services/projects.service';
 import { CreateProjectInput, UpdateProjectInput } from '../types/project.types';
 import * as UsersService from '../services/users.service';
@@ -37,12 +36,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        // Convert creator _id to ObjectId
-        const creatorObjectId = typeof creatorUser._id === 'string'
-            ? new ObjectId(creatorUser._id)
-            : creatorUser._id;
-
-        const project = await ProjectsService.createProject(projectData, creatorObjectId);
+        const project = await ProjectsService.createProject(projectData, creatorUser._id);
 
         res.status(201).json({
             message: 'Project created successfully',
@@ -80,11 +74,7 @@ export const getCurrentUserProjects = async (req: Request, res: Response): Promi
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const projects = await ProjectsService.getProjectsByUserId(userObjectId);
+        const projects = await ProjectsService.getProjectsByUserId(user._id);
 
         res.json({
             projects,
@@ -132,11 +122,7 @@ export const getProjectByProjectId = async (req: Request, res: Response): Promis
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const hasAccess = project.users.some(pu => pu.id.toString() === userObjectId.toString());
+        const hasAccess = project.users.some(pu => pu.id === user._id);
         if (!hasAccess) {
             res.status(403).json({
                 error: 'Forbidden: You do not have access to this project',
@@ -190,11 +176,7 @@ export const updateProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const projectUser = project.users.find(pu => pu.id.toString() === userObjectId.toString());
+        const projectUser = project.users.find(pu => pu.id === user._id);
         if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
             res.status(403).json({
                 error: 'Forbidden: You do not have permission to update this project',
@@ -257,11 +239,7 @@ export const deleteProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const projectUser = project.users.find(pu => pu.id.toString() === userObjectId.toString());
+        const projectUser = project.users.find(pu => pu.id === user._id);
         if (!projectUser || projectUser.role !== 'admin') {
             res.status(403).json({
                 error: 'Forbidden: Only admins can delete projects',
@@ -322,12 +300,8 @@ export const createProjectApiKey = async (req: Request, res: Response): Promise<
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
         // Check if the user has permission (admin or editor)
-        const projectUser = project.users.find(pu => pu.id.toString() === userObjectId.toString());
+        const projectUser = project.users.find(pu => pu.id === user._id);
         if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
             res.status(403).json({
                 error: 'Forbidden: Only admins and editors can create API keys',
@@ -390,11 +364,7 @@ export const getProjectApiKeys = async (req: Request, res: Response): Promise<vo
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const projectUser = project.users.find(pu => pu.id.toString() === userObjectId.toString());
+        const projectUser = project.users.find(pu => pu.id === user._id);
         if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
             res.status(403).json({
                 error: 'Forbidden: Only admins and editors can view API keys',
@@ -457,11 +427,7 @@ export const deleteProjectApiKey = async (req: Request, res: Response): Promise<
             return;
         }
 
-        const userObjectId = typeof user._id === 'string'
-            ? new ObjectId(user._id)
-            : user._id;
-
-        const projectUser = project.users.find(pu => pu.id.toString() === userObjectId.toString());
+        const projectUser = project.users.find(pu => pu.id === user._id);
         if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
             res.status(403).json({
                 error: 'Forbidden: Only admins and editors can delete API keys',
@@ -542,12 +508,8 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
             return;
         }
 
-        const currentUserObjectId = typeof currentUser._id === 'string'
-            ? new ObjectId(currentUser._id)
-            : currentUser._id;
-
         // Check if current user is admin on the project
-        const currentProjectUser = project.users.find(pu => pu.id.toString() === currentUserObjectId.toString());
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
         if (!currentProjectUser || currentProjectUser.role !== 'admin') {
             res.status(403).json({
                 error: 'Forbidden: Only project admins can modify user roles',
@@ -555,18 +517,16 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
             return;
         }
 
-        // Validate the userId is a valid ObjectId
-        if (!ObjectId.isValid(userId)) {
+        // Validate the userId (basic check that it's not empty)
+        if (!userId || typeof userId !== 'string') {
             res.status(400).json({
                 error: 'Invalid user ID format',
             });
             return;
         }
 
-        const targetUserObjectId = new ObjectId(userId);
-
         // Verify the target user exists on the project
-        const targetProjectUser = project.users.find(pu => pu.id.toString() === targetUserObjectId.toString());
+        const targetProjectUser = project.users.find(pu => pu.id === userId);
         if (!targetProjectUser) {
             res.status(404).json({
                 error: 'User is not a member of this project',
@@ -575,7 +535,7 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
         }
 
         // Prevent admin from changing their own role
-        if (currentUserObjectId.toString() === targetUserObjectId.toString() && role !== 'admin') {
+        if (currentUser._id === userId && role !== 'admin') {
             res.status(400).json({
                 error: 'Admins cannot remove their own admin role',
             });
@@ -583,7 +543,7 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
         }
 
         // Update the user's role
-        const updatedProject = await ProjectsService.updateUserRoleOnProject(projectId, targetUserObjectId, role);
+        const updatedProject = await ProjectsService.updateUserRoleOnProject(projectId, userId, role);
 
         if (!updatedProject) {
             res.status(404).json({
