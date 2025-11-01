@@ -2,7 +2,12 @@ import { Request, Response } from 'express';
 import * as LogsService from '../services/logs.service';
 import * as ProjectsService from '../services/projects.service';
 import * as UsersService from '../services/users.service';
+import * as PubSubService from '../services/pubsub.service';
 import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
+import { LOG_INGESTION_TOPIC } from '../constants';
+
+// Ensure the topic exists at startup
+PubSubService.ensureTopicExists(LOG_INGESTION_TOPIC).catch(console.error);
 
 /**
  * @swagger
@@ -20,8 +25,8 @@ import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
  *           schema:
  *             $ref: '#/components/schemas/CreateLogInput'
  *     responses:
- *       201:
- *         description: Log created successfully
+ *       202:
+ *         description: Log accepted for processing
  *         content:
  *           application/json:
  *             schema:
@@ -29,9 +34,10 @@ import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
  *               properties:
  *                 message:
  *                   type: string
- *                   example: Log created successfully
- *                 log:
- *                   $ref: '#/components/schemas/Log'
+ *                   example: Log accepted for processing
+ *                 messageId:
+ *                   type: string
+ *                   description: The ID of the message sent to the queue.
  *       400:
  *         description: Missing required fields
  *         content:
@@ -101,14 +107,11 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
         }
 
         // Insert into Firestore and index in Typesense in parallel
-        const [log] = await Promise.all([
-            LogsService.createLog(logData),
-            LogsService.indexLogInSearch(logData),
-        ]);
+        const messageId = await PubSubService.publishMessage(LOG_INGESTION_TOPIC, logData);
 
-        res.status(201).json({
-            message: 'Log created successfully',
-            log,
+        res.status(202).json({
+            message: 'Log accepted for processing',
+            messageId,
         });
     } catch (error: any) {
         console.error('Error creating log:', error);

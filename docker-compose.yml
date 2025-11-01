@@ -29,6 +29,17 @@ services:
     networks:
       - keepwatch-network
 
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    container_name: keepwatch-pubsub
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    command: >
+      gcloud beta emulators pubsub start --project=keepwatch-dev --host-port=0.0.0.0:8085
+    networks:
+      - keepwatch-network
+
 volumes:
   typesense-data:
 

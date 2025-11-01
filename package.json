@@ -6,17 +6,21 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev-debug": "tsx watch --inspect=0.0.0.0:9229 src/index.ts",
-    "build": "tsc",
     "start": "node dist/index.js",
+    "start:worker": "tsx src/workers/log-ingestion-worker.ts",
+    "start:worker-dev": "tsx watch src/workers/log-ingestion-worker.ts",
+    "build": "tsc",
     "type-check": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "lint": "eslint . --ext .ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/pubsub": "^5.2.0",
     "@types/ioredis": "^4.28.10",
     "bcrypt": "^6.0.0",
     "dotenv": "^16.3.1",
