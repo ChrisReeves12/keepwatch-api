@@ -134,22 +134,31 @@ export async function findProjectById(id: string): Promise<Project | null> {
  */
 export async function getProjectsByUserId(userId: string): Promise<Project[]> {
     const collection = getProjectsCollection();
-    const snapshot = await collection
+
+    // The query now works because we created the composite index
+    const adminSnapshot = await collection
         .where('users', 'array-contains', { id: userId, role: 'admin' })
         .orderBy('createdAt', 'desc')
         .get();
 
-    // Note: array-contains doesn't work with objects that have different values
-    // We need to query all projects and filter manually
-    const allSnapshot = await collection.orderBy('createdAt', 'desc').get();
-    const projects: Project[] = [];
+    const memberSnapshot = await collection
+        .where('users', 'array-contains', { id: userId, role: 'member' })
+        .orderBy('createdAt', 'desc')
+        .get();
 
-    for (const doc of allSnapshot.docs) {
-        const project = toProject(doc);
-        if (project && project.users.some(u => u.id === userId)) {
-            projects.push(project);
-        }
-    }
+    const viewerSnapshot = await collection
+        .where('users', 'array-contains', { id: userId, role: 'viewer' })
+        .orderBy('createdAt', 'desc')
+        .get();
+
+    const allDocs = [...adminSnapshot.docs, ...memberSnapshot.docs, ...viewerSnapshot.docs];
+
+    // Remove duplicates (a user could be in a project with multiple roles, though unlikely with current logic)
+    const uniqueDocs = allDocs.filter((doc, index, self) =>
+        index === self.findIndex((d) => d.id === doc.id)
+    );
+
+    const projects = uniqueDocs.map(doc => toProject(doc)!).filter(Boolean);
 
     return projects;
 }
