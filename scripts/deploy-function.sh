@@ -69,6 +69,7 @@ gcloud functions deploy "$FUNCTION_NAME" \
     --timeout="60s" \
     --max-instances="100" \
     --min-instances="0" \
+    --allow-unauthenticated \
     --retry
 
 echo ""

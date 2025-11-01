@@ -3,7 +3,7 @@ import { PubSub } from '@google-cloud/pubsub';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
-import { processLogMessage } from '../services/logs.service';
+import { storeLogMessage } from '../services/logs.service';
 import { LOG_INGESTION_TOPIC, LOG_INGESTION_SUBSCRIPTION } from '../constants';
 
 /**
@@ -50,7 +50,7 @@ async function initialize() {
             const logData: CreateLogInput = JSON.parse(message.data.toString());
 
             // Use the same shared processing logic as the Cloud Function
-            await processLogMessage(logData);
+            await storeLogMessage(logData);
             console.log(`Processed log message: ${message.id}`);
 
             // Acknowledge the message so it's not sent again

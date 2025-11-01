@@ -3,7 +3,7 @@ import { CloudEvent } from '@google-cloud/functions-framework';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
-import { processLogMessage } from '../services/logs.service';
+import { storeLogMessage } from '../services/logs.service';
 
 // Initialize connections on cold start
 let isInitialized = false;
@@ -51,7 +51,7 @@ export async function processLogIngestion(cloudEvent: CloudEvent<PubSubMessage>)
         const logData: CreateLogInput = JSON.parse(messageData);
 
         // Use shared processing logic
-        await processLogMessage(logData);
+        await storeLogMessage(logData);
     } catch (error: any) {
         console.error('❌ Error processing log:', error.message);
         // Throwing an error will cause the function to retry (with exponential backoff)
