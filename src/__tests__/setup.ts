@@ -66,13 +66,49 @@ jest.mock('typesense', () => {
                         });
                     }
 
-                    // Handle search query (q parameter)
+                    // Handle search query (q parameter) with simple boolean + wildcard support
                     if (searchParams.q && searchParams.q !== '*') {
-                        const queryTerm = searchParams.q.toLowerCase();
                         const queryBy = searchParams.query_by || 'message';
+                        const useBooleanAnd = !!searchParams.use_boolean_and;
+
+                        // Tokenize on whitespace; ignore literal OR for safety
+                        const rawTerms: string[] = String(searchParams.q)
+                            .split(/\s+/)
+                            .filter(Boolean)
+                            .filter(t => t.toUpperCase() !== 'OR' && t.toUpperCase() !== 'AND');
+
+                        const termMatchers = rawTerms.map(term => {
+                            const lower = term.toLowerCase();
+                            const startsWithWildcard = lower.startsWith('*');
+                            const endsWithWildcard = lower.endsWith('*');
+                            const core = lower.replace(/^\*/,'').replace(/\*$/,'');
+
+                            return (text: string) => {
+                                const value = text.toLowerCase();
+                                if (startsWithWildcard && endsWithWildcard) {
+                                    // *core*
+                                    return value.includes(core);
+                                } else if (startsWithWildcard) {
+                                    // *core => endsWith
+                                    return value.endsWith(core);
+                                } else if (endsWithWildcard) {
+                                    // core* => startsWith
+                                    return value.startsWith(core);
+                                } else {
+                                    // contains
+                                    return value.includes(core);
+                                }
+                            };
+                        });
+
                         documents = documents.filter((doc: any) => {
-                            const fieldValue = String(doc[queryBy] || '').toLowerCase();
-                            return fieldValue.includes(queryTerm);
+                            const fieldValue = String(doc[queryBy] || '');
+                            if (termMatchers.length === 0) return true;
+                            if (useBooleanAnd) {
+                                return termMatchers.every(match => match(fieldValue));
+                            } else {
+                                return termMatchers.some(match => match(fieldValue));
+                            }
                         });
                     }
 

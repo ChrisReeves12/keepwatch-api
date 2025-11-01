@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import * as LogsService from '../services/logs.service';
 import * as ProjectsService from '../services/projects.service';
 import * as UsersService from '../services/users.service';
-import { CreateLogInput } from '../types/log.types';
+import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
 
 /**
  * @swagger
@@ -82,6 +82,13 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             logData.timestampMS = Date.now();
         }
 
+        // Generate detailString from details
+        if (!logData.details || Object.keys(logData.details).length === 0) {
+            logData.detailString = null;
+        } else {
+            logData.detailString = JSON.stringify(logData.details);
+        }
+
         // Use the project from the API key
         const project = req.apiKeyProject;
 
@@ -114,44 +121,178 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
 
 /**
  * @swagger
- * /api/v1/logs:
- *   get:
- *     summary: Get logs for a project
- *     description: Get logs for a project with pagination and filtering. Requires API key authentication via X-API-Key header. The project is identified by the API key.
+ * /api/v1/logs/{projectId}/search:
+ *   post:
+ *     summary: Search logs for a project
+ *     description: Search logs for a project with pagination and advanced filtering. Requires JWT authentication via Bearer token. The user must be a member of the project. Supports advanced filtering on message, stack trace, and details with contains/startsWith/endsWith and AND/OR logic.
  *     tags: [Logs]
  *     security:
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           minimum: 1
- *           default: 1
- *         description: Page number for pagination
- *       - in: query
- *         name: pageSize
- *         schema:
- *           type: integer
- *           minimum: 1
- *           maximum: 1000
- *           default: 50
- *         description: Number of logs per page
- *       - in: query
- *         name: level
+ *       - in: path
+ *         name: projectId
+ *         required: true
  *         schema:
  *           type: string
- *         description: Filter by log level (e.g., error, warn, info, debug)
- *       - in: query
- *         name: environment
- *         schema:
- *           type: string
- *         description: Filter by environment name
- *       - in: query
- *         name: message
- *         schema:
- *           type: string
- *         description: Search in log messages
+ *         description: Project slug identifier
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               page:
+ *                 type: integer
+ *                 minimum: 1
+ *                 default: 1
+ *                 description: Page number for pagination
+ *               pageSize:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 1000
+ *                 default: 50
+ *                 description: Number of logs per page
+ *               level:
+ *                 type: string
+ *                 description: Filter by log level (e.g., error, warn, info, debug)
+ *               environment:
+ *                 type: string
+ *                 description: Filter by environment name
+ *               message:
+ *                 type: object
+ *                 description: Advanced message filter with AND/OR logic
+ *                 properties:
+ *                   operator:
+ *                     type: string
+ *                     enum: [AND, OR]
+ *                     description: Logical operator to combine conditions
+ *                   conditions:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         phrase:
+ *                           type: string
+ *                           description: The text to search for
+ *                         matchType:
+ *                           type: string
+ *                           enum: [contains, startsWith, endsWith]
+ *                           description: Type of match to perform
+ *               stackTrace:
+ *                 type: object
+ *                 description: Advanced stack trace filter with AND/OR logic
+ *                 properties:
+ *                   operator:
+ *                     type: string
+ *                     enum: [AND, OR]
+ *                     description: Logical operator to combine conditions
+ *                   conditions:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         phrase:
+ *                           type: string
+ *                           description: The text to search for in stack trace
+ *                         matchType:
+ *                           type: string
+ *                           enum: [contains, startsWith, endsWith]
+ *                           description: Type of match to perform
+ *               details:
+ *                 type: object
+ *                 description: Advanced details filter with AND/OR logic
+ *                 properties:
+ *                   operator:
+ *                     type: string
+ *                     enum: [AND, OR]
+ *                     description: Logical operator to combine conditions
+ *                   conditions:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         phrase:
+ *                           type: string
+ *                           description: The text to search for in details
+ *                         matchType:
+ *                           type: string
+ *                           enum: [contains, startsWith, endsWith]
+ *                           description: Type of match to perform
+ *           examples:
+ *             simpleQuery:
+ *               summary: Simple query with pagination
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 level: error
+ *                 environment: production
+ *             messageFilterAnd:
+ *               summary: Message filter with AND logic
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 messageFilter:
+ *                   operator: AND
+ *                   conditions:
+ *                     - phrase: "database"
+ *                       matchType: "contains"
+ *                     - phrase: "error"
+ *                       matchType: "contains"
+ *             messageFilterOr:
+ *               summary: Message filter with OR logic
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 messageFilter:
+ *                   operator: OR
+ *                   conditions:
+ *                     - phrase: "Connection"
+ *                       matchType: "startsWith"
+ *                     - phrase: "timeout"
+ *                       matchType: "endsWith"
+ *             stackTraceFilter:
+ *               summary: Stack trace filter example
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 stackTrace:
+ *                   operator: AND
+ *                   conditions:
+ *                     - phrase: "TypeError"
+ *                       matchType: "contains"
+ *                     - phrase: "at line"
+ *                       matchType: "contains"
+ *             detailsFilter:
+ *               summary: Details filter example
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 details:
+ *                   operator: OR
+ *                   conditions:
+ *                     - phrase: "userId"
+ *                       matchType: "contains"
+ *                     - phrase: "requestId"
+ *                       matchType: "contains"
+ *             combinedFilters:
+ *               summary: Combined filters example
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 level: error
+ *                 messageFilter:
+ *                   operator: AND
+ *                   conditions:
+ *                     - phrase: "failed"
+ *                       matchType: "contains"
+ *                 stackTrace:
+ *                   operator: OR
+ *                   conditions:
+ *                     - phrase: "TypeError"
+ *                       matchType: "contains"
+ *                     - phrase: "ReferenceError"
+ *                       matchType: "contains"
  *     responses:
  *       200:
  *         description: Logs retrieved successfully
@@ -180,13 +321,25 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                       type: number
  *                       example: 2
  *       400:
- *         description: Invalid pagination parameters
+ *         description: Invalid request parameters
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
  *       401:
- *         description: API key authentication required
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
  *         content:
  *           application/json:
  *             schema:
@@ -198,45 +351,129 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-export const getLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
+export const queryLogsByProjectId = async (req: Request, res: Response): Promise<void> => {
     try {
-        // Verify API key authentication
-        if (!req.apiKeyProject) {
+        // Verify JWT authentication
+        if (!req.user) {
             res.status(401).json({
-                error: 'API key authentication required',
+                error: 'Authentication required',
             });
             return;
         }
 
-        // Use the project from the API key
-        const project = req.apiKeyProject;
-        const projectId = project.projectId;
+        // Get projectId from path params
+        const { projectId } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
 
-        // Parse query parameters
-        const pageParam = req.query.page as string | undefined;
-        const pageSizeParam = req.query.pageSize as string | undefined;
-        const page = pageParam ? parseInt(pageParam) : 1;
-        const pageSize = pageSizeParam ? parseInt(pageSizeParam) : 50;
-        const level = req.query.level as string | undefined;
-        const environment = req.query.environment as string | undefined;
-        const message = req.query.message as string | undefined;
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is a member of the project (any role)
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Parse request body
+        const requestBody: QueryLogsRequest = req.body || {};
+        const page = requestBody.page ?? 1;
+        const pageSize = requestBody.pageSize ?? 50;
+        const level = requestBody.level;
+        const environment = requestBody.environment;
+        const messageFilter = requestBody.message;
+        const stackTraceFilter = requestBody.stackTrace;
+        const detailsFilter = requestBody.details;
 
         // Validate page and pageSize
-        if (isNaN(page) || page < 1) {
+        if (page < 1) {
             res.status(400).json({
-                error: 'Page must be greater than 0',
+                error: 'Page must be a number greater than 0',
             });
             return;
         }
 
-        if (isNaN(pageSize) || pageSize < 1 || pageSize > 1000) {
+        if (pageSize < 1 || pageSize > 1000) {
             res.status(400).json({
-                error: 'Page size must be between 1 and 1000',
+                error: 'Page size must be a number between 1 and 1000',
             });
             return;
         }
 
-        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment, message);
+        // Helper function to validate a filter
+        const validateFilter = (filter: any, filterName: string): string | null => {
+            if (!filter.operator || !['AND', 'OR'].includes(filter.operator)) {
+                return `${filterName}.operator must be either "AND" or "OR"`;
+            }
+
+            if (!Array.isArray(filter.conditions) || filter.conditions.length === 0) {
+                return `${filterName}.conditions must be a non-empty array`;
+            }
+
+            // Validate each condition
+            for (const condition of filter.conditions) {
+                if (!condition.phrase || typeof condition.phrase !== 'string') {
+                    return `Each condition in ${filterName} must have a non-empty phrase string`;
+                }
+
+                if (!condition.matchType || !['contains', 'startsWith', 'endsWith'].includes(condition.matchType)) {
+                    return `Each condition in ${filterName} must have a matchType of "contains", "startsWith", or "endsWith"`;
+                }
+            }
+
+            return null;
+        };
+
+        // Validate messageFilter if provided
+        if (messageFilter) {
+            const error = validateFilter(messageFilter, 'messageFilter');
+            if (error) {
+                res.status(400).json({ error });
+                return;
+            }
+        }
+
+        // Validate stackTrace filter if provided
+        if (stackTraceFilter) {
+            const error = validateFilter(stackTraceFilter, 'stackTrace');
+            if (error) {
+                res.status(400).json({ error });
+                return;
+            }
+        }
+
+        // Validate details filter if provided
+        if (detailsFilter) {
+            const error = validateFilter(detailsFilter, 'details');
+            if (error) {
+                res.status(400).json({ error });
+                return;
+            }
+        }
+
+        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment, messageFilter, stackTraceFilter, detailsFilter);
 
         res.json({
             logs: result.logs,

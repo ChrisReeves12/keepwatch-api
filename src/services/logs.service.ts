@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import * as moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
-import { Log, CreateLogInput } from '../types/log.types';
+import { Log, CreateLogInput, MessageFilter } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId } from './projects.service';
 
@@ -23,7 +23,7 @@ function getLogsCollection() {
  */
 function toLog(doc: FirebaseFirestore.DocumentSnapshot): Log | null {
     if (!doc.exists) return null;
-    
+
     const data = doc.data()!;
     return {
         ...data,
@@ -67,8 +67,9 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
         message: logData.message,
         stackTrace: logData.stackTrace || [],
         rawStackTrace: logData.rawStackTrace,
+        detailString: logData.detailString || null,
         details: logData.details || {},
-        timestampMS: logData.timestampMS ?? Date.now(), // Use provided timestamp or generate one
+        timestampMS: logData.timestampMS ?? Date.now(),
         createdAt: now,
     };
 
@@ -102,6 +103,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
         stackTrace: doc.stackTrace || [],
         rawStackTrace: doc.rawStackTrace,
         details: doc.details || {},
+        detailString: doc.detailString,
         timestampMS: doc.timestampMS,
         createdAt: doc.createdAt ? new Date(doc.createdAt) : new Date(doc.timestampMS),
     };
@@ -114,7 +116,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
  * @param pageSize - Number of logs per page
  * @param level - Optional filter by log level
  * @param environment - Optional filter by environment
- * @param message - Optional search query for message field
+ * @param messageFilter - Optional message filter with AND/OR logic
  * @returns Object containing logs array, total count, page, and pageSize
  */
 export async function getLogsByProjectId(
@@ -123,10 +125,21 @@ export async function getLogsByProjectId(
     pageSize: number = 50,
     level?: string,
     environment?: string,
-    message?: string
+    messageFilter?: MessageFilter,
+    stackTraceFilter?: MessageFilter,
+    detailsFilter?: MessageFilter
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
     if (!isTypesenseEnabled()) {
-        return getLogsByProjectIdFromFirestore(projectId, page, pageSize, level, environment, message);
+        return getLogsByProjectIdFromFirestore(
+            projectId,
+            page,
+            pageSize,
+            level,
+            environment,
+            messageFilter,
+            stackTraceFilter,
+            detailsFilter
+        );
     }
 
     const typesenseClient = getTypesenseClient();
@@ -143,16 +156,54 @@ export async function getLogsByProjectId(
     }
 
     // Build search parameters
+    let searchQuery = '*';
+    let queryBy: string | undefined;
+    let useBooleanAnd: boolean | undefined;
+
+    if (messageFilter && messageFilter.conditions.length > 0) {
+        // Build Typesense query for message filter
+        const queryParts: string[] = [];
+
+        for (const condition of messageFilter.conditions) {
+            const { phrase, matchType } = condition;
+            let queryPart: string;
+
+            switch (matchType) {
+                case 'startsWith':
+                    queryPart = `${phrase}*`;
+                    break;
+                case 'endsWith':
+                    queryPart = `*${phrase}`;
+                    break;
+                case 'contains':
+                default:
+                    queryPart = phrase;
+                    break;
+            }
+
+            queryParts.push(queryPart);
+        }
+
+        // Join terms with spaces; enforce AND via use_boolean_and flag
+        searchQuery = queryParts.join(' ');
+        useBooleanAnd = messageFilter.operator === 'AND';
+        queryBy = 'message';
+    }
+
     const searchParameters: any = {
-        q: message || '*',
+        q: searchQuery,
         filter_by: filterBy.join(' && '),
         sort_by: 'timestampMS:desc',
         per_page: pageSize,
         page: page,
     };
 
-    if (message) {
-        searchParameters.query_by = 'message';
+    if (queryBy) {
+        searchParameters.query_by = queryBy;
+    }
+
+    if (useBooleanAnd !== undefined) {
+        searchParameters.use_boolean_and = useBooleanAnd;
     }
 
     // Execute search
@@ -161,14 +212,33 @@ export async function getLogsByProjectId(
         .documents()
         .search(searchParameters);
 
-    const total = searchResults.found || 0;
+    // Enforce message/stackTrace/details filter semantics on returned hits to guarantee correctness
+    let hits: any[] = searchResults.hits || [];
+    if (messageFilter && messageFilter.conditions.length > 0) {
+        hits = hits.filter((hit: any) =>
+            typeof hit?.document?.message === 'string' &&
+            messageMatchesFilter(hit.document.message, messageFilter)
+        );
+    }
+
+    if (stackTraceFilter && stackTraceFilter.conditions.length > 0) {
+        hits = hits.filter((hit: any) =>
+            messageMatchesFilter(getStackTraceText(hit?.document), stackTraceFilter)
+        );
+    }
+
+    if (detailsFilter && detailsFilter.conditions.length > 0) {
+        hits = hits.filter((hit: any) =>
+            messageMatchesFilter(getDetailsText(hit?.document), detailsFilter)
+        );
+    }
+
+    const total = hits.length;
     const totalPages = Math.ceil(total / pageSize);
 
     // Convert Typesense documents to Log format
     const logs = await Promise.all(
-        (searchResults.hits || []).map((hit: any) =>
-            typesenseDocToLog(hit.document, projectId)
-        )
+        hits.map((hit: any) => typesenseDocToLog(hit.document, projectId))
     );
 
     return {
@@ -215,7 +285,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             rawStackTrace: logData.rawStackTrace,
             details: logData.details || {},
             timestampMS: logData.timestampMS ?? Date.now(), // Use provided timestamp or generate one
-            createdAt: 'createdAt' in logData && logData.createdAt instanceof Date
+            createdAt: 'createdAt' in logData
                 ? logData.createdAt.getTime()
                 : Date.now(),
         };
@@ -228,6 +298,87 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
 }
 
 /**
+ * Test if a message matches a message filter condition
+ * @param message - The message to test
+ * @param condition - The condition to match
+ * @returns True if the message matches the condition
+ */
+function messageMatchesCondition(message: string, condition: { phrase: string; matchType: string }): boolean {
+    const lowerMessage = message.toLowerCase();
+    const lowerPhrase = condition.phrase.toLowerCase();
+
+    switch (condition.matchType) {
+        case 'startsWith':
+            return lowerMessage.startsWith(lowerPhrase);
+        case 'endsWith':
+            return lowerMessage.endsWith(lowerPhrase);
+        case 'contains':
+        default:
+            return lowerMessage.includes(lowerPhrase);
+    }
+}
+
+/**
+ * Test if a message matches a message filter
+ * @param message - The message to test
+ * @param messageFilter - The filter to apply
+ * @returns True if the message matches the filter
+ */
+function messageMatchesFilter(message: string, messageFilter: MessageFilter): boolean {
+    if (!messageFilter.conditions || messageFilter.conditions.length === 0) {
+        return true;
+    }
+
+    if (messageFilter.operator === 'AND') {
+        return messageFilter.conditions.every(condition =>
+            messageMatchesCondition(message, condition)
+        );
+    } else {
+        // OR
+        return messageFilter.conditions.some(condition =>
+            messageMatchesCondition(message, condition)
+        );
+    }
+}
+
+/**
+ * Extract a string representation of stack trace data from a Typesense doc or Log
+ */
+function getStackTraceText(source: any): string {
+    const raw = typeof source?.rawStackTrace === 'string' ? source.rawStackTrace : '';
+    if (raw) return raw;
+    const stack = Array.isArray(source?.stackTrace) ? source.stackTrace : [];
+    try {
+        return stack
+            .map((f: any) =>
+                [f?.message, f?.originalLine, f?.file, f?.function]
+                    .filter(Boolean)
+                    .join(' ')
+            )
+            .join(' | ');
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Extract a string representation of details data from a Typesense doc or Log
+ */
+function getDetailsText(source: any): string {
+    if (typeof source?.detailString === 'string' && source.detailString) {
+        return source.detailString as string;
+    }
+    if (source?.details && typeof source.details === 'object') {
+        try {
+            return JSON.stringify(source.details);
+        } catch {
+            return '';
+        }
+    }
+    return '';
+}
+
+/**
  * Get logs from Firestore (fallback when Typesense is not enabled)
  */
 async function getLogsByProjectIdFromFirestore(
@@ -236,7 +387,9 @@ async function getLogsByProjectIdFromFirestore(
     pageSize: number,
     level?: string,
     environment?: string,
-    message?: string
+    messageFilter?: MessageFilter,
+    stackTraceFilter?: MessageFilter,
+    detailsFilter?: MessageFilter
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
     const collection = getLogsCollection();
 
@@ -251,28 +404,51 @@ async function getLogsByProjectIdFromFirestore(
         query = query.where('environment', '==', environment);
     }
 
-    // Note: Firestore doesn't support regex/text search, so we use Typesense for search
-    // Message search would need to be handled by Typesense or client-side filtering
-    if (message) {
-        console.warn('Message search is not supported in Firestore. Use Typesense for full-text search.');
+    // Note: Firestore doesn't support regex/text search natively
+    // We'll fetch all matching documents and filter in memory
+    if (messageFilter) {
+        console.warn('Message filtering in Firestore requires client-side filtering. Consider using Typesense for better performance.');
     }
 
-    // Get total count (this requires a separate query)
-    const countSnapshot = await query.get();
-    const total = countSnapshot.size;
+    // Get all matching documents (before message filtering)
+    query = query.orderBy('timestampMS', 'desc');
+    const snapshot = await query.get();
+    let allLogs = snapshot.docs.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
+
+    // Apply message filter if provided
+    if (messageFilter && messageFilter.conditions.length > 0) {
+        allLogs = allLogs.filter(log => messageMatchesFilter(log.message, messageFilter));
+    }
+
+    // Apply stackTrace filter
+    if (stackTraceFilter && stackTraceFilter.conditions.length > 0) {
+        allLogs = allLogs.filter(log =>
+            messageMatchesFilter(
+                log.rawStackTrace || getStackTraceText(log as any),
+                stackTraceFilter
+            )
+        );
+    }
+
+    // Apply details filter
+    if (detailsFilter && detailsFilter.conditions.length > 0) {
+        allLogs = allLogs.filter(log =>
+            messageMatchesFilter(
+                typeof (log as any).detailString === 'string' && (log as any).detailString
+                    ? (log as any).detailString
+                    : getDetailsText(log as any),
+                detailsFilter
+            )
+        );
+    }
+
+    const total = allLogs.length;
     const totalPages = Math.ceil(total / pageSize);
 
-    // Get paginated results
-    query = query.orderBy('timestampMS', 'desc');
-    
-    if (page > 1) {
-        query = query.offset((page - 1) * pageSize);
-    }
-    
-    query = query.limit(pageSize);
-
-    const snapshot = await query.get();
-    const logs = snapshot.docs.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
+    // Apply pagination
+    const startIndex = (page - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const logs = allLogs.slice(startIndex, endIndex);
 
     return {
         logs,

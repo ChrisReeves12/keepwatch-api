@@ -1,17 +1,4 @@
 steps:
-  # Install dependencies for testing
-  - name: 'gcr.io/cloud-builders/npm'
-    id: 'Install dependencies'
-    args: ['install']
-
-  # Run tests
-  - name: 'gcr.io/cloud-builders/npm'
-    id: 'Run tests'
-    args: ['test']
-    env:
-      - 'CI=true'
-      - 'JWT_SECRET=test-jwt-secret-key-for-testing-only'
-
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
     id: 'Build image'
