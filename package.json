@@ -9,7 +9,10 @@
     "start": "node dist/index.js",
     "start:worker": "tsx src/workers/log-ingestion-worker.ts",
     "start:worker-dev": "tsx watch src/workers/log-ingestion-worker.ts",
+    "start:function": "npx functions-framework --target=processLogIngestion --signature-type=cloudevent --source=dist/functions",
     "build": "tsc",
+    "build:function": "tsc",
+    "gcp-build": "tsc",
     "type-check": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -20,6 +23,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/functions-framework": "^4.0.0",
     "@google-cloud/pubsub": "^5.2.0",
     "@types/ioredis": "^4.28.10",
     "bcrypt": "^6.0.0",
