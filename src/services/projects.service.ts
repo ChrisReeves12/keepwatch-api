@@ -3,6 +3,7 @@ import { getFirestore, serverTimestamp, arrayUnion, arrayRemove } from '../datab
 import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
 import { getCache, setCache } from './redis.service';
+import { deleteLogsByProjectId } from './logs.service';
 
 const COLLECTION_NAME = 'projects';
 
@@ -14,6 +15,7 @@ function getProjectsCollection() {
     if (!db) {
         throw new Error('Firestore not connected');
     }
+
     return db.collection(COLLECTION_NAME);
 }
 
@@ -212,6 +214,7 @@ export async function updateProject(projectId: string, updateData: UpdateProject
 
 /**
  * Delete a project by projectId
+ * Also deletes all logs associated with the project (cascading delete)
  * @param projectId - The unique projectId identifier
  * @returns true if project was deleted, false otherwise
  */
@@ -223,7 +226,13 @@ export async function deleteProject(projectId: string): Promise<boolean> {
         return false;
     }
 
+    // Delete all logs associated with this project (cascading delete)
+    const { deletedCount } = await deleteLogsByProjectId(projectId);
+
+    // Delete the project
     await snapshot.docs[0].ref.delete();
+    console.log(`✅ Deleted project: ${projectId}`);
+
     return true;
 }
 
