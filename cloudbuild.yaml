@@ -33,7 +33,7 @@ steps:
       - '--service-account=keepwatch-api-sa@${PROJECT_ID}.iam.gserviceaccount.com'
       - '--vpc-connector=keepwatch-connector'
       - '--update-secrets=TYPESENSE_API_KEY=TYPESENSE_API_KEY:latest,TYPESENSE_HOST=TYPESENSE_HOST:latest,REDIS_HOST=REDIS_HOST:latest,MONGODB_CONNECTION_STRING=MONGODB_CONNECTION_STRING:latest,JWT_SECRET=JWT_SECRET:latest'
-      - '--set-env-vars=TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379,JWT_EXPIRY=30d'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379,JWT_EXPIRY=30d'
 
 substitutions:
   _SERVICE_NAME: 'keepwatch-api'
