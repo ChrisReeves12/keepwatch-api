@@ -8,6 +8,25 @@ import { findProjectByProjectId } from './projects.service';
 const COLLECTION_NAME = 'logs';
 
 /**
+ * Process a log message by saving it to Firestore and indexing in Typesense.
+ * This is the shared processing logic used by both the local worker and Cloud Function.
+ * 
+ * @param logData - The log data to process
+ * @throws Error if processing fails
+ */
+export async function processLogMessage(logData: CreateLogInput): Promise<void> {
+    console.log(`📝 Processing log for project: ${logData.projectId}, level: ${logData.level}`);
+
+    // Process the log (save to Firestore and index in Typesense)
+    await Promise.all([
+        createLog(logData),
+        indexLogInSearch(logData),
+    ]);
+
+    console.log('✅ Log processed successfully');
+}
+
+/**
  * Get the logs collection
  */
 function getLogsCollection() {

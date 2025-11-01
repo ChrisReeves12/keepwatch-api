@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { CloudEvent } from '@google-cloud/functions-framework';
-import * as LogsService from '../services/logs.service';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
+import { processLogMessage } from '../services/logs.service';
 
 // Initialize connections on cold start
 let isInitialized = false;
@@ -50,15 +50,8 @@ export async function processLogIngestion(cloudEvent: CloudEvent<PubSubMessage>)
 
         const logData: CreateLogInput = JSON.parse(messageData);
 
-        console.log(`📝 Processing log for project: ${logData.projectId}, level: ${logData.level}`);
-
-        // Process the log (save to Firestore and index in Typesense)
-        await Promise.all([
-            LogsService.createLog(logData),
-            LogsService.indexLogInSearch(logData),
-        ]);
-
-        console.log('✅ Log processed successfully');
+        // Use shared processing logic
+        await processLogMessage(logData);
     } catch (error: any) {
         console.error('❌ Error processing log:', error.message);
         // Throwing an error will cause the function to retry (with exponential backoff)

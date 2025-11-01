@@ -1,16 +1,18 @@
 import 'dotenv/config';
 import { PubSub } from '@google-cloud/pubsub';
-import * as LogsService from '../services/logs.service';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
+import { processLogMessage } from '../services/logs.service';
 import { LOG_INGESTION_TOPIC, LOG_INGESTION_SUBSCRIPTION } from '../constants';
 
 /**
- * Initializes the Pub/Sub client and sets up the subscription.
+ * Local development worker for log ingestion.
+ * This subscribes to the Pub/Sub emulator and processes messages using the same
+ * logic as the production Cloud Function.
  */
 async function initialize() {
-    console.log('Initializing log ingestion worker...');
+    console.log('🚀 Initializing log ingestion worker (local dev)...');
 
     // Initialize external services
     await connectToFirestore();
@@ -44,22 +46,18 @@ async function initialize() {
 
     // Listen for messages
     subscription.on('message', async (message: any) => {
-        let logData: CreateLogInput;
-
         try {
-            logData = JSON.parse(message.data.toString());
+            const logData: CreateLogInput = JSON.parse(message.data.toString());
 
-            await Promise.all([
-                LogsService.createLog(logData),
-                LogsService.indexLogInSearch(logData),
-            ]);
+            // Use the same shared processing logic as the Cloud Function
+            await processLogMessage(logData);
+            console.log(`Processed log message: ${message.id}`);
 
             // Acknowledge the message so it's not sent again
             message.ack();
-
         } catch (error: any) {
             console.error(`❌ Error processing message ${message.id}:`, error.message);
-            // Todo: Might implement a dead-letter queue later
+            // Note: Might implement a dead-letter queue later
             message.nack();
         }
     });
