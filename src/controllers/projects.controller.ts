@@ -1032,7 +1032,7 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
  * @swagger
  * /api/v1/projects/{projectId}/api-keys/{apiKeyId}:
  *   put:
- *     summary: Update an API key configuration
+ *     summary: Update a project's API key configuration
  *     description: Update an API key's constraints (IP restrictions, referer, rate limits, etc.). User must be admin or editor.
  *     tags: [Projects]
  *     security:
@@ -1233,7 +1233,7 @@ export const updateProjectApiKey = async (req: Request, res: Response): Promise<
         });
     } catch (error: any) {
         console.error('Error updating API key:', error);
-        
+
         // Check if it's a validation error
         if (error.message && typeof error.message === 'string') {
             res.status(400).json({
