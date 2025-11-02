@@ -69,7 +69,9 @@ export async function createProjectIndexes(): Promise<void> {
  * Handles proxy headers (X-Forwarded-For, X-Real-IP)
  */
 export function extractClientIp(req: Request): string | null {
-    // Check X-Forwarded-For header (common with proxies/load balancers)
+
+    console.log('headers', req.headers);
+
     const xForwardedFor = req.headers['x-forwarded-for'];
     if (xForwardedFor) {
         // X-Forwarded-For can contain multiple IPs, take the first one (original client)
