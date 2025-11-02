@@ -1,4 +1,4 @@
-import { getFirestore } from '../database/firestore.connection';
+import { getFirestore, toDate } from '../database/firestore.connection';
 import moment from 'moment';
 
 const COLLECTION_NAME = 'password_recovery_codes';
@@ -90,19 +90,24 @@ export async function validateRecoveryCode(email: string, code: string): Promise
 
     // Get the most recent code if multiple exist (shouldn't happen, but just in case)
     const docs = snapshot.docs.sort((a, b) => {
-        const aData = a.data() as PasswordRecoveryCode;
-        const bData = b.data() as PasswordRecoveryCode;
-        return bData.createdAt.getTime() - aData.createdAt.getTime();
+        const aData = a.data();
+        const bData = b.data();
+        const aCreatedAt = toDate(aData.createdAt);
+        const bCreatedAt = toDate(bData.createdAt);
+        return bCreatedAt.getTime() - aCreatedAt.getTime();
     });
-
+    
     const doc = docs[0];
-    const data = doc.data() as PasswordRecoveryCode;
+    const rawData = doc.data();
+
+    // Convert Firestore Timestamps to Date objects
+    const expiresAt = toDate(rawData.expiresAt);
 
     // Check if code has expired
     const now = moment();
-    const expiresAt = moment(data.expiresAt);
+    const expiresAtMoment = moment(expiresAt);
 
-    if (now.isAfter(expiresAt)) {
+    if (now.isAfter(expiresAtMoment)) {
         // Mark as used since it's expired
         await doc.ref.update({ used: true });
         return false;
