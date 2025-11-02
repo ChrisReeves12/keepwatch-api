@@ -71,6 +71,7 @@ export async function createProjectIndexes(): Promise<void> {
 export function extractClientIp(req: Request): string | null {
 
     console.log('headers', req.headers);
+    console.log('remote-address', req.socket?.remoteAddress);
 
     const xForwardedFor = req.headers['x-forwarded-for'];
     if (xForwardedFor) {
