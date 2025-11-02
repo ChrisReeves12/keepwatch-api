@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import * as ProjectsService from '../services/projects.service';
-import { CreateProjectInput, UpdateProjectInput } from '../types/project.types';
+import { CreateProjectInput, UpdateProjectInput, UpdateApiKeyInput } from '../types/project.types';
 import * as UsersService from '../services/users.service';
 
 /**
@@ -1023,6 +1023,228 @@ export const updateUserRoleOnProject = async (req: Request, res: Response): Prom
         console.error('Error updating user role:', error);
         res.status(500).json({
             error: 'Failed to update user role',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/api-keys/{apiKeyId}:
+ *   put:
+ *     summary: Update an API key configuration
+ *     description: Update an API key's constraints (IP restrictions, referer, rate limits, etc.). User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: apiKeyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               constraints:
+ *                 type: object
+ *                 properties:
+ *                   ipRestrictions:
+ *                     type: object
+ *                     properties:
+ *                       allowedIps:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["192.168.1.1", "10.0.0.0/8"]
+ *                   refererRestrictions:
+ *                     type: object
+ *                     properties:
+ *                       allowedReferers:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["https://example.com/*"]
+ *                   rateLimits:
+ *                     type: object
+ *                     properties:
+ *                       requestsPerMinute:
+ *                         type: number
+ *                         example: 100
+ *                       requestsPerHour:
+ *                         type: number
+ *                         example: 5000
+ *                       requestsPerDay:
+ *                         type: number
+ *                         example: 100000
+ *                   expirationDate:
+ *                     type: string
+ *                     format: date-time
+ *                     example: "2025-12-31T23:59:59Z"
+ *                   allowedEnvironments:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                     example: ["production", "staging"]
+ *                   originRestrictions:
+ *                     type: object
+ *                     properties:
+ *                       allowedOrigins:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["https://app.example.com"]
+ *                   userAgentRestrictions:
+ *                     type: object
+ *                     properties:
+ *                       allowedPatterns:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["^MyApp\\/.*"]
+ *           examples:
+ *             ipRestriction:
+ *               summary: IP address restrictions
+ *               value:
+ *                 constraints:
+ *                   ipRestrictions:
+ *                     allowedIps: ["192.168.1.100", "10.0.0.0/24"]
+ *             refererRestriction:
+ *               summary: HTTP Referer restrictions
+ *               value:
+ *                 constraints:
+ *                   refererRestrictions:
+ *                     allowedReferers: ["https://myapp.com/*", "https://*.myapp.com/*"]
+ *             multipleConstraints:
+ *               summary: Multiple constraints
+ *               value:
+ *                 constraints:
+ *                   ipRestrictions:
+ *                     allowedIps: ["192.168.1.0/24"]
+ *                   allowedEnvironments: ["production"]
+ *                   expirationDate: "2025-12-31T23:59:59Z"
+ *     responses:
+ *       200:
+ *         description: API key updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: API key updated successfully
+ *                 apiKey:
+ *                   $ref: '#/components/schemas/ProjectApiKey'
+ *       400:
+ *         description: Invalid constraint configuration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can update API keys
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, API key, or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const updateProjectApiKey = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId, apiKeyId } = req.params;
+        const updateData: UpdateApiKeyInput = req.body;
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has permission (admin or editor)
+        const projectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
+            res.status(403).json({
+                error: 'Forbidden: Only admins and editors can update API keys',
+            });
+            return;
+        }
+
+        // Update the API key
+        const updatedApiKey = await ProjectsService.updateApiKey(projectId, apiKeyId, updateData);
+
+        if (!updatedApiKey) {
+            res.status(404).json({
+                error: 'API key not found',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'API key updated successfully',
+            apiKey: updatedApiKey,
+        });
+    } catch (error: any) {
+        console.error('Error updating API key:', error);
+        
+        // Check if it's a validation error
+        if (error.message && typeof error.message === 'string') {
+            res.status(400).json({
+                error: 'Invalid constraint configuration',
+                details: error.message,
+            });
+            return;
+        }
+
+        res.status(500).json({
+            error: 'Failed to update API key',
             details: error.message,
         });
     }

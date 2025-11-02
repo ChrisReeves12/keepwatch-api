@@ -14,6 +14,7 @@ router.delete('/:projectId', authenticate, ProjectsController.deleteProject);
 // API key routes
 router.post('/:projectId/api-keys', authenticate, ProjectsController.createProjectApiKey);
 router.get('/:projectId/api-keys', authenticate, ProjectsController.getProjectApiKeys);
+router.put('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController.updateProjectApiKey);
 router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController.deleteProjectApiKey);
 
 // User role routes
