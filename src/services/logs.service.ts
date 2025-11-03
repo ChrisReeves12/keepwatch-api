@@ -231,28 +231,9 @@ export async function getLogsByProjectId(
         .documents()
         .search(searchParameters);
 
-    // Enforce message/stackTrace/details filter semantics on returned hits to guarantee correctness
     let hits: any[] = searchResults.hits || [];
-    if (messageFilter && messageFilter.conditions.length > 0) {
-        hits = hits.filter((hit: any) =>
-            typeof hit?.document?.message === 'string' &&
-            messageMatchesFilter(hit.document.message, messageFilter)
-        );
-    }
 
-    if (stackTraceFilter && stackTraceFilter.conditions.length > 0) {
-        hits = hits.filter((hit: any) =>
-            messageMatchesFilter(getStackTraceText(hit?.document), stackTraceFilter)
-        );
-    }
-
-    if (detailsFilter && detailsFilter.conditions.length > 0) {
-        hits = hits.filter((hit: any) =>
-            messageMatchesFilter(getDetailsText(hit?.document), detailsFilter)
-        );
-    }
-
-    const total = hits.length;
+    const total = searchResults.found || 0;
     const totalPages = Math.ceil(total / pageSize);
 
     // Convert Typesense documents to Log format
