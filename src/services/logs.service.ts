@@ -129,49 +129,48 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
 }
 
 /**
- * Get logs for a project with filtering and pagination using Typesense
+ * Get logs for a project with filtering and pagination
  * @param projectId - The projectId to get logs for
  * @param page - Page number (1-based)
  * @param pageSize - Number of logs per page
- * @param level - Optional filter by log level
- * @param environment - Optional filter by environment
+ * @param level - Optional filter by log level(s)
+ * @param environment - Optional filter by environment(s)
  * @param messageFilter - Optional message filter with AND/OR logic
+ * @param stackTraceFilter - Optional stack trace filter with AND/OR logic
+ * @param detailsFilter - Optional details filter with AND/OR logic
  * @returns Object containing logs array, total count, page, and pageSize
  */
 export async function getLogsByProjectId(
     projectId: string,
     page: number = 1,
     pageSize: number = 50,
-    level?: string,
-    environment?: string,
+    level?: string | string[],
+    environment?: string | string[],
     messageFilter?: MessageFilter,
     stackTraceFilter?: MessageFilter,
     detailsFilter?: MessageFilter
 ): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
-    if (!isTypesenseEnabled()) {
-        return getLogsByProjectIdFromFirestore(
-            projectId,
-            page,
-            pageSize,
-            level,
-            environment,
-            messageFilter,
-            stackTraceFilter,
-            detailsFilter
-        );
-    }
-
     const typesenseClient = getTypesenseClient();
 
     // Build filter_by clause
     const filterBy: string[] = [`projectId:${projectId}`];
 
     if (level) {
-        filterBy.push(`level:${level}`);
+        if (Array.isArray(level)) {
+            // For multiple levels, use Typesense array syntax: level:[error,warn,info]
+            filterBy.push(`level:[${level.join(',')}]`);
+        } else {
+            filterBy.push(`level:${level}`);
+        }
     }
 
     if (environment) {
-        filterBy.push(`environment:${environment}`);
+        if (Array.isArray(environment)) {
+            // For multiple environments, use Typesense array syntax
+            filterBy.push(`environment:[${environment.join(',')}]`);
+        } else {
+            filterBy.push(`environment:${environment}`);
+        }
     }
 
     // Build search parameters
@@ -295,168 +294,6 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
         console.error('Failed to index log in Typesense:', error);
         throw error;
     }
-}
-
-/**
- * Test if a message matches a message filter condition
- * @param message - The message to test
- * @param condition - The condition to match
- * @returns True if the message matches the condition
- */
-function messageMatchesCondition(message: string, condition: { phrase: string; matchType: string }): boolean {
-    const lowerMessage = message.toLowerCase();
-    const lowerPhrase = condition.phrase.toLowerCase();
-
-    switch (condition.matchType) {
-        case 'startsWith':
-            return lowerMessage.startsWith(lowerPhrase);
-        case 'endsWith':
-            return lowerMessage.endsWith(lowerPhrase);
-        case 'contains':
-        default:
-            return lowerMessage.includes(lowerPhrase);
-    }
-}
-
-/**
- * Test if a message matches a message filter
- * @param message - The message to test
- * @param messageFilter - The filter to apply
- * @returns True if the message matches the filter
- */
-function messageMatchesFilter(message: string, messageFilter: MessageFilter): boolean {
-    if (!messageFilter.conditions || messageFilter.conditions.length === 0) {
-        return true;
-    }
-
-    if (messageFilter.operator === 'AND') {
-        return messageFilter.conditions.every(condition =>
-            messageMatchesCondition(message, condition)
-        );
-    } else {
-        // OR
-        return messageFilter.conditions.some(condition =>
-            messageMatchesCondition(message, condition)
-        );
-    }
-}
-
-/**
- * Extract a string representation of stack trace data from a Typesense doc or Log
- */
-function getStackTraceText(source: any): string {
-    const raw = typeof source?.rawStackTrace === 'string' ? source.rawStackTrace : '';
-    if (raw) return raw;
-    const stack = Array.isArray(source?.stackTrace) ? source.stackTrace : [];
-    try {
-        return stack
-            .map((f: any) =>
-                [f?.message, f?.originalLine, f?.file, f?.function]
-                    .filter(Boolean)
-                    .join(' ')
-            )
-            .join(' | ');
-    } catch {
-        return '';
-    }
-}
-
-/**
- * Extract a string representation of details data from a Typesense doc or Log
- */
-function getDetailsText(source: any): string {
-    if (typeof source?.detailString === 'string' && source.detailString) {
-        return source.detailString as string;
-    }
-    if (source?.details && typeof source.details === 'object') {
-        try {
-            return JSON.stringify(source.details);
-        } catch {
-            return '';
-        }
-    }
-    return '';
-}
-
-/**
- * Get logs from Firestore (fallback when Typesense is not enabled)
- */
-async function getLogsByProjectIdFromFirestore(
-    projectId: string,
-    page: number,
-    pageSize: number,
-    level?: string,
-    environment?: string,
-    messageFilter?: MessageFilter,
-    stackTraceFilter?: MessageFilter,
-    detailsFilter?: MessageFilter
-): Promise<{ logs: Log[]; total: number; page: number; pageSize: number; totalPages: number }> {
-    const collection = getLogsCollection();
-
-    // Build query
-    let query: FirebaseFirestore.Query = collection.where('projectId', '==', projectId);
-
-    if (level) {
-        query = query.where('level', '==', level);
-    }
-
-    if (environment) {
-        query = query.where('environment', '==', environment);
-    }
-
-    // Note: Firestore doesn't support regex/text search natively
-    // We'll fetch all matching documents and filter in memory
-    if (messageFilter) {
-        console.warn('Message filtering in Firestore requires client-side filtering. Consider using Typesense for better performance.');
-    }
-
-    // Get all matching documents (before message filtering)
-    query = query.orderBy('timestampMS', 'desc');
-    const snapshot = await query.get();
-    let allLogs = snapshot.docs.map(doc => toLog(doc)).filter((log): log is Log => Boolean(log));
-
-    // Apply message filter if provided
-    if (messageFilter && messageFilter.conditions.length > 0) {
-        allLogs = allLogs.filter(log => messageMatchesFilter(log.message, messageFilter));
-    }
-
-    // Apply stackTrace filter
-    if (stackTraceFilter && stackTraceFilter.conditions.length > 0) {
-        allLogs = allLogs.filter(log =>
-            messageMatchesFilter(
-                log.rawStackTrace || getStackTraceText(log as any),
-                stackTraceFilter
-            )
-        );
-    }
-
-    // Apply details filter
-    if (detailsFilter && detailsFilter.conditions.length > 0) {
-        allLogs = allLogs.filter(log =>
-            messageMatchesFilter(
-                typeof (log as any).detailString === 'string' && (log as any).detailString
-                    ? (log as any).detailString
-                    : getDetailsText(log as any),
-                detailsFilter
-            )
-        );
-    }
-
-    const total = allLogs.length;
-    const totalPages = Math.ceil(total / pageSize);
-
-    // Apply pagination
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const logs = allLogs.slice(startIndex, endIndex);
-
-    return {
-        logs,
-        total,
-        page,
-        pageSize,
-        totalPages,
-    };
 }
 
 /**

@@ -157,11 +157,19 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                 default: 50
  *                 description: Number of logs per page
  *               level:
- *                 type: string
- *                 description: Filter by log level (e.g., error, warn, info, debug)
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Filter by log level(s) - can be a single string or array of strings (e.g., "error" or ["error", "warn"])
  *               environment:
- *                 type: string
- *                 description: Filter by environment name
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Filter by environment name(s) - can be a single string or array of strings
  *               message:
  *                 type: object
  *                 description: Advanced message filter with AND/OR logic
@@ -230,6 +238,17 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                 pageSize: 50
  *                 level: error
  *                 environment: production
+ *             multipleFilters:
+ *               summary: Multiple levels and environments
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 level:
+ *                   - error
+ *                   - warn
+ *                 environment:
+ *                   - production
+ *                   - staging
  *             messageFilterAnd:
  *               summary: Message filter with AND logic
  *               value:
@@ -404,8 +423,8 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
         const requestBody: QueryLogsRequest = req.body || {};
         const page = requestBody.page ?? 1;
         const pageSize = requestBody.pageSize ?? 50;
-        const level = requestBody.level;
-        const environment = requestBody.environment;
+        let level = requestBody.level;
+        let environment = requestBody.environment;
         const messageFilter = requestBody.message;
         const stackTraceFilter = requestBody.stackTrace;
         const detailsFilter = requestBody.details;
@@ -423,6 +442,64 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
                 error: 'Page size must be a number between 1 and 1000',
             });
             return;
+        }
+
+        // Validate level parameter
+        if (level !== undefined) {
+            if (Array.isArray(level)) {
+                if (level.length === 0) {
+                    res.status(400).json({
+                        error: 'Level array cannot be empty',
+                    });
+                    return;
+                }
+                if (level.length > 10) {
+                    res.status(400).json({
+                        error: 'Level array cannot contain more than 10 items',
+                    });
+                    return;
+                }
+                if (!level.every(l => typeof l === 'string')) {
+                    res.status(400).json({
+                        error: 'All level values must be strings',
+                    });
+                    return;
+                }
+            } else if (typeof level !== 'string') {
+                res.status(400).json({
+                    error: 'Level must be a string or array of strings',
+                });
+                return;
+            }
+        }
+
+        // Validate environment parameter
+        if (environment !== undefined) {
+            if (Array.isArray(environment)) {
+                if (environment.length === 0) {
+                    res.status(400).json({
+                        error: 'Environment array cannot be empty',
+                    });
+                    return;
+                }
+                if (environment.length > 10) {
+                    res.status(400).json({
+                        error: 'Environment array cannot contain more than 10 items',
+                    });
+                    return;
+                }
+                if (!environment.every(e => typeof e === 'string')) {
+                    res.status(400).json({
+                        error: 'All environment values must be strings',
+                    });
+                    return;
+                }
+            } else if (typeof environment !== 'string') {
+                res.status(400).json({
+                    error: 'Environment must be a string or array of strings',
+                });
+                return;
+            }
         }
 
         // Helper function to validate a filter

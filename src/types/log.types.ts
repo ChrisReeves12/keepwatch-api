@@ -68,8 +68,8 @@ export interface MessageFilter {
 export interface QueryLogsRequest {
     page?: number;
     pageSize?: number;
-    level?: string;
-    environment?: string;
+    level?: string | string[];
+    environment?: string | string[];
     message?: MessageFilter;
     stackTrace?: MessageFilter;
     details?: MessageFilter;
