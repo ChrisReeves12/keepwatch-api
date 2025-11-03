@@ -19,6 +19,7 @@ router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController
 
 // User role routes
 router.put('/:projectId/users/:userId/role', authenticate, ProjectsController.updateUserRoleOnProject);
+router.delete('/:projectId/users/:userId', authenticate, ProjectsController.removeUserFromProject);
 
 export default router;
 

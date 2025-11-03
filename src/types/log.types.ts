@@ -71,6 +71,6 @@ export interface QueryLogsRequest {
     level?: string;
     environment?: string;
     message?: MessageFilter;
-    stackTrace?: MessageFilter; // Filter for rawStackTrace field
-    details?: MessageFilter; // Filter for detailString field
+    stackTrace?: MessageFilter;
+    details?: MessageFilter;
 }

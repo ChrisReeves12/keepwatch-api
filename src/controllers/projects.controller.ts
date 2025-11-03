@@ -262,8 +262,25 @@ export const getProjectByProjectId = async (req: Request, res: Response): Promis
             return;
         }
 
+        const enrichedUsers = await Promise.all(
+            project.users.map(async (projectUser) => {
+                const userData = await UsersService.findUserById(projectUser.id);
+                return {
+                    id: projectUser.id,
+                    role: projectUser.role,
+                    name: userData?.name || null,
+                    email: userData?.email || null,
+                };
+            })
+        );
+
+        const enrichedProject = {
+            ...project,
+            users: enrichedUsers,
+        };
+
         res.json({
-            project,
+            project: enrichedProject,
         });
     } catch (error: any) {
         console.error('Error fetching project:', error);
@@ -1245,6 +1262,150 @@ export const updateProjectApiKey = async (req: Request, res: Response): Promise<
 
         res.status(500).json({
             error: 'Failed to update API key',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/users/{userId}:
+ *   delete:
+ *     summary: Remove a user from a project
+ *     description: Remove a user from a project. Current user must be admin on the project. Admins cannot remove themselves.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User Firestore document ID
+ *     responses:
+ *       200:
+ *         description: User removed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: User removed from project successfully
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       400:
+ *         description: Admins cannot remove themselves
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only project admins can remove users
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, user, or user membership not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const removeUserFromProject = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId, userId } = req.params;
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is admin on the project
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser || currentProjectUser.role !== 'admin') {
+            res.status(403).json({
+                error: 'Forbidden: Only project admins can remove users',
+            });
+            return;
+        }
+
+        // Prevent admin from removing themselves
+        if (currentUser._id === userId) {
+            res.status(400).json({
+                error: 'Admins cannot remove themselves from the project',
+            });
+            return;
+        }
+
+        // Verify the target user exists on the project
+        const targetProjectUser = project.users.find(pu => pu.id === userId);
+        if (!targetProjectUser) {
+            res.status(404).json({
+                error: 'User is not a member of this project',
+            });
+            return;
+        }
+
+        // Remove the user
+        const updatedProject = await ProjectsService.removeUserFromProject(projectId, userId);
+
+        if (!updatedProject) {
+            res.status(404).json({
+                error: 'Failed to remove user from project',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'User removed from project successfully',
+            project: updatedProject,
+        });
+    } catch (error: any) {
+        console.error('Error removing user from project:', error);
+        res.status(500).json({
+            error: 'Failed to remove user from project',
             details: error.message,
         });
     }

@@ -1,5 +1,6 @@
 import express, { Express } from 'express';
 import dotenv from 'dotenv';
+import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import v1Routes from './routes/v1routes';
 import { connectToFirestore, closeFirestoreConnection } from './database/firestore.connection';
@@ -17,6 +18,26 @@ const app: Express = express();
 const PORT = process.env.PORT || 3300;
 
 // Middleware
+app.use(cors({
+    origin: (origin, callback) => {
+        const allowedOrigins = [
+            'https://keepwatch.io',
+            'http://localhost:5173'
+        ];
+
+        // Allow requests with no origin (like mobile apps or Postman)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

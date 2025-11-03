@@ -69,10 +69,6 @@ export async function createProjectIndexes(): Promise<void> {
  * Handles proxy headers (X-Forwarded-For, X-Real-IP)
  */
 export function extractClientIp(req: Request): string | null {
-
-    console.log('headers', req.headers);
-    console.log('remote-address', req.socket?.remoteAddress);
-
     const xForwardedFor = req.headers['x-forwarded-for'];
     if (xForwardedFor) {
         // X-Forwarded-For can contain multiple IPs, take the first one (original client)
@@ -1050,4 +1046,48 @@ export async function updateApiKey(
     await setCache(cacheKey, null, 1); // Set to expire immediately
 
     return updatedApiKeys[apiKeyIndex];
+}
+
+/**
+ * Remove a user from a project
+ * @param projectId - The unique projectId identifier
+ * @param userId - Document ID of the user to remove
+ * @returns Updated project document or null if project or user not found
+ */
+export async function removeUserFromProject(
+    projectId: string,
+    userId: string
+): Promise<Project | null> {
+    const collection = getProjectsCollection();
+
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
+    if (!project) {
+        return null;
+    }
+
+    // Check if user exists in the project
+    const userExists = project.users.some(u => u.id === userId);
+    if (!userExists) {
+        return null;
+    }
+
+    // Remove the user
+    const updatedUsers = project.users.filter(u => u.id !== userId);
+
+    await docRef.update({
+        users: updatedUsers,
+        updatedAt: new Date(),
+    });
+
+    const updatedDoc = await docRef.get();
+    return toProject(updatedDoc);
 }
