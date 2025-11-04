@@ -55,6 +55,14 @@ export interface MessageCondition {
 }
 
 /**
+ * Document filter (searches across message, rawStackTrace, and detailString)
+ */
+export interface DocFilter {
+    phrase: string;
+    matchType: MessageMatchType;
+}
+
+/**
  * Message filter with AND/OR logic
  */
 export interface MessageFilter {
@@ -70,6 +78,9 @@ export interface QueryLogsRequest {
     pageSize?: number;
     level?: string | string[];
     environment?: string | string[];
+    startTime?: number; // Unix timestamp in milliseconds - start of time range
+    endTime?: number; // Unix timestamp in milliseconds - end of time range
+    docFilter?: DocFilter;
     message?: MessageFilter;
     stackTrace?: MessageFilter;
     details?: MessageFilter;

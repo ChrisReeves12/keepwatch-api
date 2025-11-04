@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import * as moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
-import { Log, CreateLogInput, MessageFilter } from '../types/log.types';
+import { Log, CreateLogInput, MessageFilter, DocFilter } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId } from './projects.service';
 
@@ -135,6 +135,9 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
  * @param pageSize - Number of logs per page
  * @param level - Optional filter by log level(s)
  * @param environment - Optional filter by environment(s)
+ * @param startTime - Optional start time filter (Unix timestamp in milliseconds)
+ * @param endTime - Optional end time filter (Unix timestamp in milliseconds)
+ * @param docFilter - Optional document-wide filter (searches across message, rawStackTrace, and detailString)
  * @param messageFilter - Optional message filter with AND/OR logic
  * @param stackTraceFilter - Optional stack trace filter with AND/OR logic
  * @param detailsFilter - Optional details filter with AND/OR logic
@@ -146,6 +149,9 @@ export async function getLogsByProjectId(
     pageSize: number = 50,
     level?: string | string[],
     environment?: string | string[],
+    startTime?: number,
+    endTime?: number,
+    docFilter?: DocFilter,
     messageFilter?: MessageFilter,
     stackTraceFilter?: MessageFilter,
     detailsFilter?: MessageFilter
@@ -173,12 +179,50 @@ export async function getLogsByProjectId(
         }
     }
 
+    // Add time range filters
+    if (startTime !== undefined) {
+        filterBy.push(`timestampMS:>=${startTime}`);
+    }
+
+    if (endTime !== undefined) {
+        filterBy.push(`timestampMS:<=${endTime}`);
+    }
+
     // Build search parameters
     let searchQuery = '*';
     let queryBy: string | undefined;
     let useBooleanAnd: boolean | undefined;
+    let useTextSearch = false; // Track if we're using text-based search
 
-    if (messageFilter && messageFilter.conditions.length > 0) {
+    // Helper function to escape double quotes in search phrases
+    const escapeDoubleQuotes = (str: string): string => {
+        return str.replace(/"/g, '\\"');
+    };
+
+    // Handle docFilter - searches across message, rawStackTrace, and detailString
+    if (docFilter) {
+        const { phrase, matchType } = docFilter;
+        let queryPart: string;
+
+        switch (matchType) {
+            case 'startsWith':
+                queryPart = `${phrase}*`;
+                break;
+            case 'endsWith':
+                queryPart = `*${phrase}`;
+                break;
+            case 'contains':
+            default:
+                // Wrap in double quotes for exact match with no typo tolerance
+                // Escape any double quotes in the phrase first
+                queryPart = `"${escapeDoubleQuotes(phrase)}"`;
+                break;
+        }
+
+        searchQuery = queryPart;
+        queryBy = 'message,rawStackTrace,detailString';
+        useTextSearch = true;
+    } else if (messageFilter && messageFilter.conditions.length > 0) {
         // Build Typesense query for message filter
         const queryParts: string[] = [];
 
@@ -195,7 +239,9 @@ export async function getLogsByProjectId(
                     break;
                 case 'contains':
                 default:
-                    queryPart = phrase;
+                    // Wrap in double quotes for exact match with no typo tolerance
+                    // Escape any double quotes in the phrase first
+                    queryPart = `"${escapeDoubleQuotes(phrase)}"`;
                     break;
             }
 
@@ -206,15 +252,80 @@ export async function getLogsByProjectId(
         searchQuery = queryParts.join(' ');
         useBooleanAnd = messageFilter.operator === 'AND';
         queryBy = 'message';
+        useTextSearch = true;
+    } else if (stackTraceFilter && stackTraceFilter.conditions.length > 0) {
+        // Build Typesense query for stack trace filter
+        const queryParts: string[] = [];
+
+        for (const condition of stackTraceFilter.conditions) {
+            const { phrase, matchType } = condition;
+            let queryPart: string;
+
+            switch (matchType) {
+                case 'startsWith':
+                    queryPart = `${phrase}*`;
+                    break;
+                case 'endsWith':
+                    queryPart = `*${phrase}`;
+                    break;
+                case 'contains':
+                default:
+                    // Wrap in double quotes for exact match with no typo tolerance
+                    // Escape any double quotes in the phrase first
+                    queryPart = `"${escapeDoubleQuotes(phrase)}"`;
+                    break;
+            }
+
+            queryParts.push(queryPart);
+        }
+
+        searchQuery = queryParts.join(' ');
+        useBooleanAnd = stackTraceFilter.operator === 'AND';
+        queryBy = 'rawStackTrace';
+        useTextSearch = true;
+    } else if (detailsFilter && detailsFilter.conditions.length > 0) {
+        // Build Typesense query for details filter
+        const queryParts: string[] = [];
+
+        for (const condition of detailsFilter.conditions) {
+            const { phrase, matchType } = condition;
+            let queryPart: string;
+
+            switch (matchType) {
+                case 'startsWith':
+                    queryPart = `${phrase}*`;
+                    break;
+                case 'endsWith':
+                    queryPart = `*${phrase}`;
+                    break;
+                case 'contains':
+                default:
+                    // Wrap in double quotes for exact match with no typo tolerance
+                    // Escape any double quotes in the phrase first
+                    queryPart = `"${escapeDoubleQuotes(phrase)}"`;
+                    break;
+            }
+
+            queryParts.push(queryPart);
+        }
+
+        searchQuery = queryParts.join(' ');
+        useBooleanAnd = detailsFilter.operator === 'AND';
+        queryBy = 'detailString';
+        useTextSearch = true;
     }
 
     const searchParameters: any = {
         q: searchQuery,
         filter_by: filterBy.join(' && '),
-        sort_by: 'timestampMS:desc',
         per_page: pageSize,
         page: page,
     };
+
+    // Only sort by timestamp if not using text-based search (sort by relevance when searching)
+    if (!useTextSearch) {
+        searchParameters.sort_by = 'timestampMS:desc';
+    }
 
     if (queryBy) {
         searchParameters.query_by = queryBy;
@@ -283,6 +394,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             stackTrace: logData.stackTrace || [],
             rawStackTrace: logData.rawStackTrace,
             details: logData.details || {},
+            detailString: 'detailString' in logData ? logData.detailString : null,
             timestampMS: logData.timestampMS ?? Date.now(), // Use provided timestamp or generate one
             createdAt: 'createdAt' in logData
                 ? logData.createdAt.getTime()

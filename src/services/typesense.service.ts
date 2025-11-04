@@ -71,8 +71,18 @@ const logsCollectionSchema = {
             optional: true,
         },
         {
+            name: 'rawStackTrace',
+            type: 'string' as const,
+            optional: true,
+        },
+        {
             name: 'details',
             type: 'object' as const,
+            optional: true,
+        },
+        {
+            name: 'detailString',
+            type: 'string' as const,
             optional: true,
         },
         {

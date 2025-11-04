@@ -170,9 +170,30 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                     items:
  *                       type: string
  *                 description: Filter by environment name(s) - can be a single string or array of strings
+ *               startTime:
+ *                 type: integer
+ *                 format: int64
+ *                 description: Start of time range filter (Unix timestamp in milliseconds). If not provided, logs from all time are included.
+ *                 example: 1609459200000
+ *               endTime:
+ *                 type: integer
+ *                 format: int64
+ *                 description: End of time range filter (Unix timestamp in milliseconds). If not provided, logs from all time are included.
+ *                 example: 1640995199999
+ *               docFilter:
+ *                 type: object
+ *                 description: Document-wide filter that searches across message, rawStackTrace, and detailString. If provided, this nullifies message, stackTrace, and details filters.
+ *                 properties:
+ *                   phrase:
+ *                     type: string
+ *                     description: The text to search for across all fields
+ *                   matchType:
+ *                     type: string
+ *                     enum: [contains, startsWith, endsWith]
+ *                     description: Type of match to perform
  *               message:
  *                 type: object
- *                 description: Advanced message filter with AND/OR logic
+ *                 description: Advanced message filter with AND/OR logic (ignored if docFilter is provided)
  *                 properties:
  *                   operator:
  *                     type: string
@@ -192,7 +213,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                           description: Type of match to perform
  *               stackTrace:
  *                 type: object
- *                 description: Advanced stack trace filter with AND/OR logic
+ *                 description: Advanced stack trace filter with AND/OR logic (ignored if docFilter is provided)
  *                 properties:
  *                   operator:
  *                     type: string
@@ -212,7 +233,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                           description: Type of match to perform
  *               details:
  *                 type: object
- *                 description: Advanced details filter with AND/OR logic
+ *                 description: Advanced details filter with AND/OR logic (ignored if docFilter is provided)
  *                 properties:
  *                   operator:
  *                     type: string
@@ -249,6 +270,22 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                 environment:
  *                   - production
  *                   - staging
+ *             docFilterExample:
+ *               summary: Document-wide filter across all text fields
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 docFilter:
+ *                   phrase: "database error"
+ *                   matchType: "contains"
+ *             timeRangeFilter:
+ *               summary: Time range filter example
+ *               value:
+ *                 page: 1
+ *                 pageSize: 50
+ *                 startTime: 1609459200000
+ *                 endTime: 1640995199999
+ *                 level: error
  *             messageFilterAnd:
  *               summary: Message filter with AND logic
  *               value:
@@ -425,6 +462,9 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
         const pageSize = requestBody.pageSize ?? 50;
         let level = requestBody.level;
         let environment = requestBody.environment;
+        const startTime = requestBody.startTime;
+        const endTime = requestBody.endTime;
+        const docFilter = requestBody.docFilter;
         const messageFilter = requestBody.message;
         const stackTraceFilter = requestBody.stackTrace;
         const detailsFilter = requestBody.details;
@@ -502,6 +542,50 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             }
         }
 
+        // Validate time range parameters
+        if (startTime !== undefined && (typeof startTime !== 'number' || startTime < 0)) {
+            res.status(400).json({
+                error: 'startTime must be a non-negative number (Unix timestamp in milliseconds)',
+            });
+            return;
+        }
+
+        if (endTime !== undefined && (typeof endTime !== 'number' || endTime < 0)) {
+            res.status(400).json({
+                error: 'endTime must be a non-negative number (Unix timestamp in milliseconds)',
+            });
+            return;
+        }
+
+        if (startTime !== undefined && endTime !== undefined && startTime > endTime) {
+            res.status(400).json({
+                error: 'startTime cannot be greater than endTime',
+            });
+            return;
+        }
+
+        // Validate docFilter if provided
+        if (docFilter !== undefined) {
+            if (!docFilter.phrase || typeof docFilter.phrase !== 'string') {
+                res.status(400).json({
+                    error: 'docFilter.phrase must be a non-empty string',
+                });
+                return;
+            }
+
+            if (!docFilter.matchType || !['contains', 'startsWith', 'endsWith'].includes(docFilter.matchType)) {
+                res.status(400).json({
+                    error: 'docFilter.matchType must be "contains", "startsWith", or "endsWith"',
+                });
+                return;
+            }
+
+            // If docFilter is provided, ignore other filters
+            if (messageFilter || stackTraceFilter || detailsFilter) {
+                console.warn('docFilter provided - ignoring message, stackTrace, and details filters');
+            }
+        }
+
         // Helper function to validate a filter
         const validateFilter = (filter: any, filterName: string): string | null => {
             if (!filter.operator || !['AND', 'OR'].includes(filter.operator)) {
@@ -526,34 +610,49 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             return null;
         };
 
-        // Validate messageFilter if provided
-        if (messageFilter) {
-            const error = validateFilter(messageFilter, 'messageFilter');
-            if (error) {
-                res.status(400).json({ error });
-                return;
+        // Only validate other filters if docFilter is not provided
+        if (!docFilter) {
+            // Validate messageFilter if provided
+            if (messageFilter) {
+                const error = validateFilter(messageFilter, 'messageFilter');
+                if (error) {
+                    res.status(400).json({ error });
+                    return;
+                }
+            }
+
+            // Validate stackTrace filter if provided
+            if (stackTraceFilter) {
+                const error = validateFilter(stackTraceFilter, 'stackTrace');
+                if (error) {
+                    res.status(400).json({ error });
+                    return;
+                }
+            }
+
+            // Validate details filter if provided
+            if (detailsFilter) {
+                const error = validateFilter(detailsFilter, 'details');
+                if (error) {
+                    res.status(400).json({ error });
+                    return;
+                }
             }
         }
 
-        // Validate stackTrace filter if provided
-        if (stackTraceFilter) {
-            const error = validateFilter(stackTraceFilter, 'stackTrace');
-            if (error) {
-                res.status(400).json({ error });
-                return;
-            }
-        }
-
-        // Validate details filter if provided
-        if (detailsFilter) {
-            const error = validateFilter(detailsFilter, 'details');
-            if (error) {
-                res.status(400).json({ error });
-                return;
-            }
-        }
-
-        const result = await LogsService.getLogsByProjectId(projectId, page, pageSize, level, environment, messageFilter, stackTraceFilter, detailsFilter);
+        const result = await LogsService.getLogsByProjectId(
+            projectId,
+            page,
+            pageSize,
+            level,
+            environment,
+            startTime,
+            endTime,
+            docFilter,
+            docFilter ? undefined : messageFilter,
+            docFilter ? undefined : stackTraceFilter,
+            docFilter ? undefined : detailsFilter
+        );
 
         res.json({
             logs: result.logs,
