@@ -77,6 +77,7 @@ export interface Project {
     projectId: string; // User-friendly slug identifier
     users: ProjectUser[];
     apiKeys?: ProjectApiKey[];
+    alarms?: ProjectAlarm[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -103,4 +104,57 @@ export interface UpdateProjectInput {
  */
 export interface UpdateApiKeyInput {
     constraints?: ApiKeyConstraints;
+}
+
+/**
+ * Email delivery method for alarms
+ */
+export interface EmailDeliveryMethod {
+    addresses: string[];
+}
+
+/**
+ * Slack delivery method for alarms
+ */
+export interface SlackDeliveryMethod {
+    webhook: string;
+}
+
+/**
+ * Webhook delivery method for alarms
+ */
+export interface WebhookDeliveryMethod {
+    url: string;
+}
+
+/**
+ * Delivery methods for alarms
+ */
+export interface AlarmDeliveryMethods {
+    email?: EmailDeliveryMethod;
+    slack?: SlackDeliveryMethod;
+    webhook?: WebhookDeliveryMethod;
+}
+
+/**
+ * Project alarm configuration
+ */
+export interface ProjectAlarm {
+    id: string;
+    logType: 'Application Log' | 'System Log';
+    message: string;
+    level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR' | 'CRITICAL';
+    environment: string;
+    deliveryMethods: AlarmDeliveryMethods;
+}
+
+/**
+ * Create alarm input
+ */
+export interface CreateAlarmInput {
+    logType: 'Application Log' | 'System Log';
+    message: string;
+    level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR' | 'CRITICAL';
+    environment: string;
+    deliveryMethods: AlarmDeliveryMethods;
 }

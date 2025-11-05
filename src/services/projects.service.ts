@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import { Request } from 'express';
 import * as ipaddr from 'ipaddr.js';
 import { getFirestore, serverTimestamp, arrayUnion, arrayRemove } from '../database/firestore.connection';
-import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey, UpdateApiKeyInput, ApiKeyConstraints } from '../types/project.types';
+import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey, UpdateApiKeyInput, ApiKeyConstraints, CreateAlarmInput, ProjectAlarm } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
 import { getCache, setCache } from './redis.service';
 import { deleteLogsByProjectId } from './logs.service';
@@ -1090,4 +1090,203 @@ export async function removeUserFromProject(
 
     const updatedDoc = await docRef.get();
     return toProject(updatedDoc);
+}
+
+/**
+ * Find an alarm with matching core fields (message, environment, logType, level)
+ * @param existingAlarms - Array of existing alarms
+ * @param newAlarm - New alarm to check
+ * @returns The matching alarm if found, undefined otherwise
+ */
+function findMatchingAlarm(existingAlarms: ProjectAlarm[], newAlarm: CreateAlarmInput): ProjectAlarm | undefined {
+    return existingAlarms.find(existing => 
+        existing.message.toLowerCase() === newAlarm.message.toLowerCase() &&
+        existing.environment.toLowerCase() === newAlarm.environment.toLowerCase() &&
+        existing.logType.toLowerCase() === newAlarm.logType.toLowerCase() &&
+        existing.level.toLowerCase() === newAlarm.level.toLowerCase()
+    );
+}
+
+/**
+ * Add an alarm to a project, or update delivery methods if matching alarm exists
+ * @param projectId - The unique projectId identifier
+ * @param alarmData - Alarm data to add
+ * @returns { added: boolean, updated: boolean, project: Project | null } - Result of the operation
+ */
+export async function addAlarmToProject(
+    projectId: string,
+    alarmData: CreateAlarmInput
+): Promise<{ added: boolean; updated: boolean; project: Project | null }> {
+    const collection = getProjectsCollection();
+
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return { added: false, updated: false, project: null };
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
+    if (!project) {
+        return { added: false, updated: false, project: null };
+    }
+
+    // Check if an alarm with matching core fields exists
+    const existingAlarms = project.alarms || [];
+    const matchingAlarm = findMatchingAlarm(existingAlarms, alarmData);
+
+    if (matchingAlarm) {
+        // Update the delivery methods of the existing alarm
+        const updatedAlarms = existingAlarms.map(alarm => {
+            if (alarm.id === matchingAlarm.id) {
+                return {
+                    ...alarm,
+                    deliveryMethods: alarmData.deliveryMethods,
+                };
+            }
+            return alarm;
+        });
+
+        await docRef.update({
+            alarms: updatedAlarms,
+            updatedAt: new Date(),
+        });
+
+        const updatedDoc = await docRef.get();
+        return { added: false, updated: true, project: toProject(updatedDoc) };
+    }
+
+    // Create the alarm object with a unique ID
+    const newAlarm: ProjectAlarm = {
+        id: randomUUID(),
+        logType: alarmData.logType,
+        message: alarmData.message.trim(),
+        level: alarmData.level,
+        environment: alarmData.environment.trim(),
+        deliveryMethods: alarmData.deliveryMethods,
+    };
+
+    // Add the alarm to the project
+    await docRef.update({
+        alarms: arrayUnion(newAlarm),
+        updatedAt: new Date(),
+    });
+
+    const updatedDoc = await docRef.get();
+    return { added: true, updated: false, project: toProject(updatedDoc) };
+}
+
+/**
+ * Get all alarms for a project
+ * @param projectId - The unique projectId identifier
+ * @returns Array of alarms or null if project not found
+ */
+export async function getProjectAlarms(projectId: string): Promise<ProjectAlarm[] | null> {
+    const project = await findProjectByProjectId(projectId);
+    if (!project) {
+        return null;
+    }
+    return project.alarms || [];
+}
+
+/**
+ * Update an alarm by its ID
+ * @param projectId - The unique projectId identifier
+ * @param alarmId - The alarm ID to update
+ * @param alarmData - Updated alarm data
+ * @returns Updated alarm or null if not found
+ */
+export async function updateAlarmById(
+    projectId: string,
+    alarmId: string,
+    alarmData: CreateAlarmInput
+): Promise<ProjectAlarm | null> {
+    const collection = getProjectsCollection();
+
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
+    if (!project) {
+        return null;
+    }
+
+    // Find the alarm to update
+    const alarmIndex = project.alarms?.findIndex(alarm => alarm.id === alarmId);
+    if (alarmIndex === undefined || alarmIndex === -1) {
+        return null;
+    }
+
+    // Update the alarm with new data (keep the same ID)
+    const updatedAlarms = [...(project.alarms || [])];
+    updatedAlarms[alarmIndex] = {
+        id: alarmId, // Keep the original ID
+        logType: alarmData.logType,
+        message: alarmData.message.trim(),
+        level: alarmData.level,
+        environment: alarmData.environment.trim(),
+        deliveryMethods: alarmData.deliveryMethods,
+    };
+
+    // Update the project
+    await docRef.update({
+        alarms: updatedAlarms,
+        updatedAt: new Date(),
+    });
+
+    return updatedAlarms[alarmIndex];
+}
+
+/**
+ * Delete an alarm from a project by alarm ID, or delete all alarms if no ID provided
+ * @param projectId - The unique projectId identifier
+ * @param alarmId - Optional alarm ID to delete. If not provided, all alarms are deleted
+ * @returns true if alarm(s) were deleted, false if project not found or alarm ID not found
+ */
+export async function deleteProjectAlarm(projectId: string, alarmId?: string): Promise<boolean> {
+    const collection = getProjectsCollection();
+
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return false;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
+    if (!project) {
+        return false;
+    }
+
+    if (alarmId) {
+        // Delete specific alarm by ID
+        const alarmToRemove = project.alarms?.find(alarm => alarm.id === alarmId);
+        if (!alarmToRemove) {
+            return false;
+        }
+
+        // Remove from alarms array
+        await docRef.update({
+            alarms: arrayRemove(alarmToRemove),
+            updatedAt: new Date(),
+        });
+    } else {
+        // Delete all alarms
+        await docRef.update({
+            alarms: [],
+            updatedAt: new Date(),
+        });
+    }
+
+    return true;
 }

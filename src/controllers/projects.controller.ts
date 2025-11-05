@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import * as ProjectsService from '../services/projects.service';
-import { CreateProjectInput, UpdateProjectInput, UpdateApiKeyInput } from '../types/project.types';
+import { CreateProjectInput, UpdateProjectInput, UpdateApiKeyInput, CreateAlarmInput } from '../types/project.types';
 import * as UsersService from '../services/users.service';
+import validator from 'validator';
 
 /**
  * @swagger
@@ -1406,6 +1407,825 @@ export const removeUserFromProject = async (req: Request, res: Response): Promis
         console.error('Error removing user from project:', error);
         res.status(500).json({
             error: 'Failed to remove user from project',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/alarms:
+ *   get:
+ *     summary: Get all alarms for a project
+ *     description: Get all alarms for a project. User must have access to the project.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     responses:
+ *       200:
+ *         description: Alarms retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 alarms:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 count:
+ *                   type: number
+ *                   example: 3
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const listProjectAlarms = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId } = req.params;
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has access to this project (any role)
+        const projectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!projectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Get the alarms
+        const alarms = await ProjectsService.getProjectAlarms(projectId);
+
+        if (alarms === null) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        res.json({
+            alarms,
+            count: alarms.length,
+        });
+    } catch (error: any) {
+        console.error('Error fetching alarms:', error);
+        res.status(500).json({
+            error: 'Failed to fetch alarms',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/alarms:
+ *   post:
+ *     summary: Create a project alarm
+ *     description: Create a new alarm for a project. If an alarm with the same message, level, environment, and logType exists, its delivery methods will be updated. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - logType
+ *               - message
+ *               - level
+ *               - environment
+ *               - deliveryMethods
+ *             properties:
+ *               logType:
+ *                 type: string
+ *                 enum: [Application Log, System Log]
+ *                 example: Application Log
+ *               message:
+ *                 type: string
+ *                 example: High CPU usage detected
+ *               level:
+ *                 type: string
+ *                 enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 example: ERROR
+ *               environment:
+ *                 type: string
+ *                 example: production
+ *               deliveryMethods:
+ *                 type: object
+ *                 properties:
+ *                   email:
+ *                     type: object
+ *                     properties:
+ *                       addresses:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["alert@example.com"]
+ *                   slack:
+ *                     type: object
+ *                     properties:
+ *                       webhook:
+ *                         type: string
+ *                         example: https://hooks.slack.com/services/...
+ *                   webhook:
+ *                     type: object
+ *                     properties:
+ *                       url:
+ *                         type: string
+ *                         example: https://your-api.com/webhook
+ *     responses:
+ *       201:
+ *         description: Alarm created successfully, or delivery methods updated if matching alarm exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Alarm created successfully
+ *                   description: Returns "Alarm created successfully" or "Alarm delivery methods updated successfully"
+ *                 alarm:
+ *                   type: object
+ *                   description: The created or updated alarm with its ID
+ *       400:
+ *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can create alarms
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const createProjectAlarm = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId } = req.params;
+        const alarmData: CreateAlarmInput = req.body;
+
+        // Validate required fields
+        if (!alarmData.logType) {
+            res.status(400).json({
+                error: 'Missing required field: logType',
+            });
+            return;
+        }
+
+        if (!alarmData.message || typeof alarmData.message !== 'string' || !alarmData.message.trim()) {
+            res.status(400).json({
+                error: 'Missing or invalid required field: message',
+            });
+            return;
+        }
+
+        if (!alarmData.level) {
+            res.status(400).json({
+                error: 'Missing required field: level',
+            });
+            return;
+        }
+
+        if (!alarmData.environment || typeof alarmData.environment !== 'string' || !alarmData.environment.trim()) {
+            res.status(400).json({
+                error: 'Missing or invalid required field: environment',
+            });
+            return;
+        }
+
+        if (!alarmData.deliveryMethods || typeof alarmData.deliveryMethods !== 'object') {
+            res.status(400).json({
+                error: 'Missing or invalid required field: deliveryMethods',
+            });
+            return;
+        }
+
+        // Validate logType
+        const validLogTypes = ['Application Log', 'System Log'];
+        if (!validLogTypes.includes(alarmData.logType)) {
+            res.status(400).json({
+                error: `Invalid logType. Must be one of: ${validLogTypes.join(', ')}`,
+            });
+            return;
+        }
+
+        // Validate level
+        const validLevels = ['INFO', 'DEBUG', 'WARNING', 'ERROR', 'CRITICAL'];
+        if (!validLevels.includes(alarmData.level)) {
+            res.status(400).json({
+                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+            });
+            return;
+        }
+
+        // Validate delivery methods - at least one must be present
+        const { email, slack, webhook } = alarmData.deliveryMethods;
+        if (!email && !slack && !webhook) {
+            res.status(400).json({
+                error: 'At least one delivery method must be specified (email, slack, or webhook)',
+            });
+            return;
+        }
+
+        // Validate email if present
+        if (email) {
+            if (!email.addresses || !Array.isArray(email.addresses) || email.addresses.length === 0) {
+                res.status(400).json({
+                    error: 'Email delivery method requires at least one email address',
+                });
+                return;
+            }
+
+            // Validate each email address
+            for (const emailAddress of email.addresses) {
+                if (!validator.isEmail(emailAddress)) {
+                    res.status(400).json({
+                        error: `Invalid email address: ${emailAddress}`,
+                    });
+                    return;
+                }
+            }
+        }
+
+        // Validate slack if present
+        if (slack) {
+            if (!slack.webhook || typeof slack.webhook !== 'string' || !slack.webhook.trim()) {
+                res.status(400).json({
+                    error: 'Slack delivery method requires a webhook URL',
+                });
+                return;
+            }
+        }
+
+        // Validate webhook if present
+        if (webhook) {
+            if (!webhook.url || typeof webhook.url !== 'string' || !webhook.url.trim()) {
+                res.status(400).json({
+                    error: 'Webhook delivery method requires a URL',
+                });
+                return;
+            }
+        }
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has permission (admin or editor)
+        const projectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
+            res.status(403).json({
+                error: 'Forbidden: Only admins and editors can create alarms',
+            });
+            return;
+        }
+
+        // Add the alarm to the project (or update if matching alarm exists)
+        const result = await ProjectsService.addAlarmToProject(projectId, alarmData);
+
+        if (!result.project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Find the alarm in the response
+        let alarm;
+        if (result.added && result.project.alarms) {
+            // New alarm was created - get the last one added
+            alarm = result.project.alarms[result.project.alarms.length - 1];
+        } else if (result.updated && result.project.alarms) {
+            // Existing alarm was updated - find it by matching fields
+            alarm = result.project.alarms.find(a =>
+                a.message.toLowerCase() === alarmData.message.toLowerCase() &&
+                a.environment.toLowerCase() === alarmData.environment.toLowerCase() &&
+                a.logType.toLowerCase() === alarmData.logType.toLowerCase() &&
+                a.level.toLowerCase() === alarmData.level.toLowerCase()
+            );
+        }
+
+        res.status(201).json({
+            message: result.added
+                ? 'Alarm created successfully'
+                : result.updated
+                    ? 'Alarm delivery methods updated successfully'
+                    : 'Alarm already exists',
+            alarm,
+        });
+    } catch (error: any) {
+        console.error('Error creating alarm:', error);
+        res.status(500).json({
+            error: 'Failed to create alarm',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/alarms/{alarmId}:
+ *   put:
+ *     summary: Update a project alarm
+ *     description: Update an existing alarm by its ID. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: alarmId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Alarm ID to update
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - logType
+ *               - message
+ *               - level
+ *               - environment
+ *               - deliveryMethods
+ *             properties:
+ *               logType:
+ *                 type: string
+ *                 enum: [Application Log, System Log]
+ *                 example: Application Log
+ *               message:
+ *                 type: string
+ *                 example: High CPU usage detected
+ *               level:
+ *                 type: string
+ *                 enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 example: ERROR
+ *               environment:
+ *                 type: string
+ *                 example: production
+ *               deliveryMethods:
+ *                 type: object
+ *                 properties:
+ *                   email:
+ *                     type: object
+ *                     properties:
+ *                       addresses:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["alert@example.com"]
+ *                   slack:
+ *                     type: object
+ *                     properties:
+ *                       webhook:
+ *                         type: string
+ *                         example: https://hooks.slack.com/services/...
+ *                   webhook:
+ *                     type: object
+ *                     properties:
+ *                       url:
+ *                         type: string
+ *                         example: https://your-api.com/webhook
+ *     responses:
+ *       200:
+ *         description: Alarm updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Alarm updated successfully
+ *                 alarm:
+ *                   type: object
+ *                   description: The updated alarm
+ *       400:
+ *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can update alarms
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, user, or alarm not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const updateProjectAlarm = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId, alarmId } = req.params;
+        const alarmData: CreateAlarmInput = req.body;
+
+        // Validate required fields (same as create)
+        if (!alarmData.logType) {
+            res.status(400).json({
+                error: 'Missing required field: logType',
+            });
+            return;
+        }
+
+        if (!alarmData.message || typeof alarmData.message !== 'string' || !alarmData.message.trim()) {
+            res.status(400).json({
+                error: 'Missing or invalid required field: message',
+            });
+            return;
+        }
+
+        if (!alarmData.level) {
+            res.status(400).json({
+                error: 'Missing required field: level',
+            });
+            return;
+        }
+
+        if (!alarmData.environment || typeof alarmData.environment !== 'string' || !alarmData.environment.trim()) {
+            res.status(400).json({
+                error: 'Missing or invalid required field: environment',
+            });
+            return;
+        }
+
+        if (!alarmData.deliveryMethods || typeof alarmData.deliveryMethods !== 'object') {
+            res.status(400).json({
+                error: 'Missing or invalid required field: deliveryMethods',
+            });
+            return;
+        }
+
+        // Validate logType
+        const validLogTypes = ['Application Log', 'System Log'];
+        if (!validLogTypes.includes(alarmData.logType)) {
+            res.status(400).json({
+                error: `Invalid logType. Must be one of: ${validLogTypes.join(', ')}`,
+            });
+            return;
+        }
+
+        // Validate level
+        const validLevels = ['INFO', 'DEBUG', 'WARNING', 'ERROR', 'CRITICAL'];
+        if (!validLevels.includes(alarmData.level)) {
+            res.status(400).json({
+                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+            });
+            return;
+        }
+
+        // Validate delivery methods - at least one must be present
+        const { email, slack, webhook } = alarmData.deliveryMethods;
+        if (!email && !slack && !webhook) {
+            res.status(400).json({
+                error: 'At least one delivery method must be specified (email, slack, or webhook)',
+            });
+            return;
+        }
+
+        // Validate email if present
+        if (email) {
+            if (!email.addresses || !Array.isArray(email.addresses) || email.addresses.length === 0) {
+                res.status(400).json({
+                    error: 'Email delivery method requires at least one email address',
+                });
+                return;
+            }
+
+            // Validate each email address
+            for (const emailAddress of email.addresses) {
+                if (!validator.isEmail(emailAddress)) {
+                    res.status(400).json({
+                        error: `Invalid email address: ${emailAddress}`,
+                    });
+                    return;
+                }
+            }
+        }
+
+        // Validate slack if present
+        if (slack) {
+            if (!slack.webhook || typeof slack.webhook !== 'string' || !slack.webhook.trim()) {
+                res.status(400).json({
+                    error: 'Slack delivery method requires a webhook URL',
+                });
+                return;
+            }
+        }
+
+        // Validate webhook if present
+        if (webhook) {
+            if (!webhook.url || typeof webhook.url !== 'string' || !webhook.url.trim()) {
+                res.status(400).json({
+                    error: 'Webhook delivery method requires a URL',
+                });
+                return;
+            }
+        }
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has permission (admin or editor)
+        const projectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
+            res.status(403).json({
+                error: 'Forbidden: Only admins and editors can update alarms',
+            });
+            return;
+        }
+
+        // Update the alarm
+        const updatedAlarm = await ProjectsService.updateAlarmById(projectId, alarmId, alarmData);
+
+        if (!updatedAlarm) {
+            res.status(404).json({
+                error: 'Alarm not found',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'Alarm updated successfully',
+            alarm: updatedAlarm,
+        });
+    } catch (error: any) {
+        console.error('Error updating alarm:', error);
+        res.status(500).json({
+            error: 'Failed to update alarm',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/alarms/{alarmId}:
+ *   delete:
+ *     summary: Delete a project alarm or all alarms
+ *     description: Delete a specific alarm by ID, or delete all alarms if no ID is provided. User must be admin or editor.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: alarmId
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Alarm ID to delete. If not provided, all alarms will be deleted.
+ *     responses:
+ *       200:
+ *         description: Alarm(s) deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Alarm deleted successfully
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Only admins and editors can delete alarms
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, user, or alarm not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const deleteProjectAlarm = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId, alarmId } = req.params;
+
+        // Get the project
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has permission (admin or editor)
+        const projectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!projectUser || (projectUser.role !== 'admin' && projectUser.role !== 'editor')) {
+            res.status(403).json({
+                error: 'Forbidden: Only admins and editors can delete alarms',
+            });
+            return;
+        }
+
+        // Delete the alarm(s)
+        const deleted = await ProjectsService.deleteProjectAlarm(projectId, alarmId);
+
+        if (!deleted) {
+            if (alarmId) {
+                res.status(404).json({
+                    error: 'Alarm not found',
+                });
+            } else {
+                res.status(404).json({
+                    error: 'Project not found',
+                });
+            }
+            return;
+        }
+
+        res.json({
+            message: alarmId ? 'Alarm deleted successfully' : 'All alarms deleted successfully',
+        });
+    } catch (error: any) {
+        console.error('Error deleting alarm:', error);
+        res.status(500).json({
+            error: 'Failed to delete alarm',
             details: error.message,
         });
     }

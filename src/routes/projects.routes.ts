@@ -21,5 +21,12 @@ router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController
 router.put('/:projectId/users/:userId/role', authenticate, ProjectsController.updateUserRoleOnProject);
 router.delete('/:projectId/users/:userId', authenticate, ProjectsController.removeUserFromProject);
 
+// Alarm routes
+router.get('/:projectId/alarms', authenticate, ProjectsController.listProjectAlarms);
+router.post('/:projectId/alarms', authenticate, ProjectsController.createProjectAlarm);
+router.put('/:projectId/alarms/:alarmId', authenticate, ProjectsController.updateProjectAlarm);
+router.delete('/:projectId/alarms/:alarmId', authenticate, ProjectsController.deleteProjectAlarm);
+router.delete('/:projectId/alarms', authenticate, ProjectsController.deleteProjectAlarm);
+
 export default router;
 
