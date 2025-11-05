@@ -76,9 +76,17 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
         const logData: CreateLogInput = req.body;
 
         // Validate required fields
-        if (!logData.level || !logData.environment || !logData.projectId || !logData.message) {
+        if (!logData.level || !logData.environment || !logData.projectId || !logData.message || !logData.logType) {
             res.status(400).json({
-                error: 'Missing required fields: level, environment, projectId, message',
+                error: 'Missing required fields: level, environment, projectId, message, logType',
+            });
+            return;
+        }
+
+        // Validate logType
+        if (logData.logType !== 'application' && logData.logType !== 'system') {
+            res.status(400).json({
+                error: 'logType must be either "application" or "system"',
             });
             return;
         }
@@ -170,6 +178,17 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                     items:
  *                       type: string
  *                 description: Filter by environment name(s) - can be a single string or array of strings
+ *               logType:
+ *                 type: string
+ *                 enum: [application, system]
+ *                 description: Filter by log type - must be either "application" or "system"
+ *               hostname:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Filter by hostname(s) - can be a single string or array of strings
  *               startTime:
  *                 type: integer
  *                 format: int64
@@ -462,6 +481,8 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
         const pageSize = requestBody.pageSize ?? 50;
         let level = requestBody.level;
         let environment = requestBody.environment;
+        const logType = requestBody.logType;
+        const hostname = requestBody.hostname;
         const startTime = requestBody.startTime;
         const endTime = requestBody.endTime;
         const docFilter = requestBody.docFilter;
@@ -537,6 +558,51 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             } else if (typeof environment !== 'string') {
                 res.status(400).json({
                     error: 'Environment must be a string or array of strings',
+                });
+                return;
+            }
+        }
+
+        // Validate logType parameter
+        if (logType !== undefined) {
+            if (typeof logType !== 'string') {
+                res.status(400).json({
+                    error: 'logType must be a string',
+                });
+                return;
+            }
+            if (logType !== 'application' && logType !== 'system') {
+                res.status(400).json({
+                    error: 'logType must be either "application" or "system"',
+                });
+                return;
+            }
+        }
+
+        // Validate hostname parameter
+        if (hostname !== undefined) {
+            if (Array.isArray(hostname)) {
+                if (hostname.length === 0) {
+                    res.status(400).json({
+                        error: 'hostname array cannot be empty',
+                    });
+                    return;
+                }
+                if (hostname.length > 10) {
+                    res.status(400).json({
+                        error: 'hostname array cannot contain more than 10 items',
+                    });
+                    return;
+                }
+                if (!hostname.every(h => typeof h === 'string')) {
+                    res.status(400).json({
+                        error: 'All hostname values must be strings',
+                    });
+                    return;
+                }
+            } else if (typeof hostname !== 'string') {
+                res.status(400).json({
+                    error: 'hostname must be a string or array of strings',
                 });
                 return;
             }
@@ -646,6 +712,8 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             pageSize,
             level,
             environment,
+            logType,
+            hostname,
             startTime,
             endTime,
             docFilter,

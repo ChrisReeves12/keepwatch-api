@@ -3,7 +3,10 @@ dotenv.config();
 
 import { getTypesenseClient } from '../services/typesense.service';
 
-const typesenseClient = getTypesenseClient();
+const typesenseClient = getTypesenseClient(
+    process.env.NODE_ENV === 'production' ? process.env.PROD_TYPESENSE_API_KEY : process.env.TYPESENSE_API_KEY,
+    process.env.NODE_ENV === 'production' ? process.env.PROD_TYPESENSE_HOST : 'localhost'
+);
 
 async function searchTypesenseCollection() {
     const collectionName = process.argv[2];

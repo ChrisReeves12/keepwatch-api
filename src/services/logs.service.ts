@@ -84,12 +84,14 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
         projectId: logData.projectId,
         projectObjectId: projectDocId, // Store the Firestore document ID
         message: logData.message,
+        logType: logData.logType,
         stackTrace: logData.stackTrace || [],
         rawStackTrace: logData.rawStackTrace,
         detailString: logData.detailString || null,
         details: logData.details || {},
         timestampMS: logData.timestampMS ?? Date.now(),
         createdAt: now,
+        hostname: logData.hostname,
     };
 
     const docRef = await collection.add(log);
@@ -119,12 +121,14 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
         projectId: doc.projectId || projectId,
         projectObjectId: projectDocId,
         message: doc.message,
+        logType: doc.logType,
         stackTrace: doc.stackTrace || [],
         rawStackTrace: doc.rawStackTrace,
         details: doc.details || {},
         detailString: doc.detailString,
         timestampMS: doc.timestampMS,
         createdAt: doc.createdAt ? new Date(doc.createdAt) : new Date(doc.timestampMS),
+        hostname: doc.hostname,
     };
 }
 
@@ -135,6 +139,8 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
  * @param pageSize - Number of logs per page
  * @param level - Optional filter by log level(s)
  * @param environment - Optional filter by environment(s)
+ * @param logType - Optional filter by log type (single string: "application" or "system")
+ * @param hostname - Optional filter by hostname(s) - can be a single string or array of strings
  * @param startTime - Optional start time filter (Unix timestamp in milliseconds)
  * @param endTime - Optional end time filter (Unix timestamp in milliseconds)
  * @param docFilter - Optional document-wide filter (searches across message, rawStackTrace, and detailString)
@@ -149,6 +155,8 @@ export async function getLogsByProjectId(
     pageSize: number = 50,
     level?: string | string[],
     environment?: string | string[],
+    logType?: string,
+    hostname?: string | string[],
     startTime?: number,
     endTime?: number,
     docFilter?: DocFilter,
@@ -176,6 +184,19 @@ export async function getLogsByProjectId(
             filterBy.push(`environment:[${environment.join(',')}]`);
         } else {
             filterBy.push(`environment:${environment}`);
+        }
+    }
+
+    if (logType) {
+        filterBy.push(`logType:${logType}`);
+    }
+
+    if (hostname) {
+        if (Array.isArray(hostname)) {
+            // For multiple hostnames, use Typesense array syntax
+            filterBy.push(`hostname:[${hostname.join(',')}]`);
+        } else {
+            filterBy.push(`hostname:${hostname}`);
         }
     }
 
@@ -391,6 +412,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             environment: logData.environment,
             projectId: logData.projectId,
             message: logData.message,
+            logType: logData.logType,
             stackTrace: logData.stackTrace || [],
             rawStackTrace: logData.rawStackTrace,
             details: logData.details || {},
@@ -399,6 +421,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             createdAt: 'createdAt' in logData
                 ? logData.createdAt.getTime()
                 : Date.now(),
+            hostname: 'hostname' in logData ? logData.hostname : undefined,
         };
 
         await typesenseClient.collections('logs').documents().create(document);

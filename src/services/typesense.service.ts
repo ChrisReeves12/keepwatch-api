@@ -9,7 +9,7 @@ export function isTypesenseEnabled(): boolean {
 /**
  * Get or create Typesense client
  */
-export function getTypesenseClient(): Client {
+export function getTypesenseClient(apiKey?: string, host?: string, port?: number, protocol?: string): Client {
     if (!isTypesenseEnabled()) {
         throw new Error('Typesense is disabled');
     }
@@ -20,15 +20,15 @@ export function getTypesenseClient(): Client {
 
     const nodes = [
         {
-            host: process.env.TYPESENSE_HOST || 'localhost',
-            port: parseInt(process.env.TYPESENSE_PORT || '8108'),
-            protocol: process.env.TYPESENSE_PROTOCOL || 'http',
+            host: host || process.env.TYPESENSE_HOST || 'localhost',
+            port: port || parseInt(process.env.TYPESENSE_PORT || '8108'),
+            protocol: protocol || process.env.TYPESENSE_PROTOCOL || 'http',
         },
     ];
 
     client = new Client({
         nodes,
-        apiKey: process.env.TYPESENSE_API_KEY || 'typesense-dev-key',
+        apiKey: apiKey || process.env.TYPESENSE_API_KEY || 'typesense-dev-key',
         connectionTimeoutSeconds: 2,
     });
 
@@ -47,7 +47,17 @@ const logsCollectionSchema = {
             type: 'string' as const,
         },
         {
+            name: 'logType',
+            type: 'string' as const,
+            facet: true,
+        },
+        {
             name: 'level',
+            type: 'string' as const,
+            facet: true,
+        },
+        {
+            name: 'hostname',
             type: 'string' as const,
             facet: true,
         },
