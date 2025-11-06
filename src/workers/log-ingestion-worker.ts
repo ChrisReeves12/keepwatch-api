@@ -4,7 +4,7 @@ import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
 import { storeLogMessage } from '../services/logs.service';
-import { LOG_INGESTION_TOPIC, LOG_INGESTION_SUBSCRIPTION } from '../constants';
+import { LOG_INGESTION_TOPIC, LOG_INGESTION_SUBSCRIPTION, LOG_ALARM_TOPIC } from '../constants';
 
 /**
  * Local development worker for log ingestion.
@@ -50,8 +50,21 @@ async function initialize() {
             const logData: CreateLogInput = JSON.parse(message.data.toString());
 
             // Use the same shared processing logic as the Cloud Function
-            await storeLogMessage(logData);
+            const log = await storeLogMessage(logData);
             console.log(`Processed log message: ${message.id}`);
+
+            // After storing the log, publish to the alarm topic with logData and logId
+            const alarmTopic = pubSubClient.topic(LOG_ALARM_TOPIC);
+            const alarmPayload = {
+                logData,
+                logId: log._id,
+            };
+
+            await alarmTopic.publishMessage({
+                json: alarmPayload,
+            });
+
+            console.log(`Published alarm message for log: ${log._id}`);
 
             // Acknowledge the message so it's not sent again
             message.ack();

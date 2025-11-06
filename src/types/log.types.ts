@@ -4,12 +4,33 @@
 export type LogType = 'application' | 'system';
 
 /**
+ * Log level
+ */
+export type LogLevel = 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR' | 'CRITICAL';
+
+/**
+ * Request information associated with a log
+ */
+export interface RequestInfo {
+    userAgent?: string;
+    url?: string;
+    queryString?: string;
+    host?: string;
+    ip?: string;
+    referer?: string;
+    browser?: string;
+    os?: string;
+    origin?: string;
+}
+
+/**
  * Log interface representing a log document in Firestore
  */
 export interface Log {
     _id?: string; // Firestore document ID
     level: string;
     environment: string;
+    request?: RequestInfo;
     projectId: string; // Project slug identifier
     projectObjectId: string; // Firestore document ID of the project
     message: string;
@@ -31,6 +52,7 @@ export interface CreateLogInput {
     environment: string;
     projectId: string;
     message: string;
+    request?: RequestInfo;
     logType: LogType; // Mandatory log type: "application" or "system"
     stackTrace?: Array<Record<string, any>>;
     rawStackTrace?: string; // Optional string representation of the original stack trace

@@ -4,10 +4,11 @@ import * as ProjectsService from '../services/projects.service';
 import * as UsersService from '../services/users.service';
 import * as PubSubService from '../services/pubsub.service';
 import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
-import { LOG_INGESTION_TOPIC } from '../constants';
+import { LOG_ALARM_TOPIC, LOG_INGESTION_TOPIC } from '../constants';
 
-// Ensure the topic exists at startup
+// Ensure the topics exist at startup
 PubSubService.ensureTopicExists(LOG_INGESTION_TOPIC).catch(console.error);
+PubSubService.ensureTopicExists(LOG_ALARM_TOPIC).catch(console.error);
 
 /**
  * @swagger
@@ -38,6 +39,22 @@ PubSubService.ensureTopicExists(LOG_INGESTION_TOPIC).catch(console.error);
  *                 messageId:
  *                   type: string
  *                   description: The ID of the message sent to the queue.
+ *                 logLevel:
+ *                   type: string
+ *                   description: The log level of the created log.
+ *                   example: error
+ *                 logMessage:
+ *                   type: string
+ *                   description: The log message content.
+ *                   example: Database connection failed
+ *                 environment:
+ *                   type: string
+ *                   description: The environment where the log was generated.
+ *                   example: production
+ *                 hostname:
+ *                   type: string
+ *                   description: The hostname where the log was generated (if provided).
+ *                   example: api-server-01
  *       400:
  *         description: Missing required fields
  *         content:
@@ -70,6 +87,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             res.status(401).json({
                 error: 'API key authentication required',
             });
+            
             return;
         }
 
@@ -80,6 +98,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             res.status(400).json({
                 error: 'Missing required fields: level, environment, projectId, message, logType',
             });
+
             return;
         }
 
@@ -88,6 +107,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             res.status(400).json({
                 error: 'logType must be either "application" or "system"',
             });
+
             return;
         }
 
@@ -111,15 +131,20 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             res.status(403).json({
                 error: 'Forbidden: API key project does not match the requested project',
             });
+
             return;
         }
 
-        // Insert into Firestore and index in Typesense in parallel
+        // Publish to ingestion topic (alarm will be published after log is stored)
         const messageId = await PubSubService.publishMessage(LOG_INGESTION_TOPIC, logData);
 
         res.status(202).json({
             message: 'Log accepted for processing',
             messageId,
+            logLevel: logData.level,
+            logMessage: logData.message,
+            environment: logData.environment,
+            hostname: logData.hostname,
         });
     } catch (error: any) {
         console.error('Error creating log:', error);

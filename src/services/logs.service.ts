@@ -1,9 +1,12 @@
 import { randomUUID } from 'crypto';
-import * as moment from 'moment';
+import moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
 import { Log, CreateLogInput, MessageFilter, DocFilter } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId } from './projects.service';
+import { sendEmail } from './mail.service';
+import slackNotify from 'slack-notify';
+import { ProjectAlarm } from '../types/project.types';
 
 const COLLECTION_NAME = 'logs';
 
@@ -12,18 +15,309 @@ const COLLECTION_NAME = 'logs';
  * This is the shared processing logic used by both the local worker and Cloud Function.
  *
  * @param logData - The log data to process
+ * @returns The created Log with its ID
  * @throws Error if processing fails
  */
-export async function storeLogMessage(logData: CreateLogInput): Promise<void> {
+export async function storeLogMessage(logData: CreateLogInput): Promise<Log> {
     console.log(`📝 Processing log for project: ${logData.projectId}, level: ${logData.level}`);
 
-    // Process the log (save to Firestore and index in Typesense)
-    await Promise.all([
-        createLog(logData),
-        indexLogInSearch(logData),
-    ]);
+    // Save to Firestore first to get the log ID
+    const log = await createLog(logData);
+
+    // Then index in Typesense
+    await indexLogInSearch(logData);
 
     console.log('✅ Log processed successfully');
+    return log;
+}
+
+/**
+ * Process a log alarm by sending an alarm notification
+ * @param logData - The log data to process
+ * @param logId - The database ID of the stored log
+ */
+export async function processLogAlarm(logData: CreateLogInput, logId: string): Promise<void> {
+    console.log(`🔔 Processing log alarm for project: ${logData.projectId}, level: ${logData.level}, logId: ${logId}`);
+
+    // Fetch the project record
+    const project = await findProjectByProjectId(logData.projectId);
+    if (!project) {
+        return;
+    }
+
+    // Check if the project has any alarms configured
+    const alarms = project.alarms || [];
+    if (alarms.length === 0) {
+        return;
+    }
+
+    for (const alarm of alarms) {
+        // Check if the log matches the alarm criteria
+        const logTypeMatches = alarm.logType === logData.logType;
+        
+        // Handle both single string and array of strings for level
+        const levelMatches = Array.isArray(alarm.level)
+            ? alarm.level.includes(logData.level.toUpperCase() as any)
+            : alarm.level === logData.level.toUpperCase();
+        
+        const environmentMatches = alarm.environment.toLowerCase() === logData.environment.toLowerCase();
+        const messageMatches = logData.message.toLowerCase().includes(alarm.message.toLowerCase());
+
+        if (logTypeMatches && levelMatches && environmentMatches && messageMatches) {
+            await deliverAlarm(alarm, logData, project.name, logId);
+        }
+    }
+
+    console.log('✅ Log alarm processed successfully');
+}
+
+/**
+ * Deliver an alarm via all configured delivery methods
+ * @param alarm - The alarm configuration
+ * @param logData - The log data that triggered the alarm
+ * @param projectName - The name of the project
+ * @param logId - The database ID of the log
+ */
+async function deliverAlarm(
+    alarm: ProjectAlarm,
+    logData: CreateLogInput,
+    projectName: string,
+    logId: string
+): Promise<void> {
+    const deliveryMethods = alarm.deliveryMethods;
+
+    // Format request object as key-value pairs (only non-empty values)
+    const formatRequestForDisplay = (request: any): { key: string; value: string }[] => {
+        if (!request) return [];
+        const lines: { key: string; value: string }[] = [];
+        for (const [key, value] of Object.entries(request)) {
+            if (value !== undefined && value !== null && value !== '') {
+                lines.push({ key, value: String(value) });
+            }
+        }
+        return lines;
+    };
+
+    const requestLines = formatRequestForDisplay(logData.request);
+
+    // Construct frontend URL
+    const webUrl = `${process.env.WEB_FRONTEND_URL}/projects/${logData.projectId}/${logId}`;
+
+    // Prepare alarm details for delivery
+    const alarmDetails = {
+        logId,
+        projectName,
+        projectId: logData.projectId,
+        level: logData.level,
+        environment: logData.environment,
+        logType: logData.logType,
+        message: logData.message,
+        request: logData.request || null,
+        requestLines,
+        timestamp: moment(logData.timestampMS || Date.now()).utc().format('MMMM D, YYYY  h:mm:ss A') + ' (UTC)',
+        hostname: logData.hostname || 'N/A',
+        stackTrace: logData.rawStackTrace || 'None',
+        webUrl,
+    };
+
+    // Deliver via email
+    if (deliveryMethods.email?.addresses && deliveryMethods.email.addresses.length > 0) {
+        try {
+            await deliverEmailAlarm(deliveryMethods.email.addresses, alarmDetails);
+            console.log(`📧 Email alarm sent to ${deliveryMethods.email.addresses.length} recipient(s)`);
+        } catch (error) {
+            console.error('Failed to send email alarm:', error);
+        }
+    }
+
+    // Deliver via Slack
+    if (deliveryMethods.slack?.webhook) {
+        try {
+            await deliverSlackAlarm(deliveryMethods.slack.webhook, alarmDetails);
+            console.log('💬 Slack alarm sent successfully');
+        } catch (error) {
+            console.error('Failed to send Slack alarm:', error);
+        }
+    }
+
+    // Deliver via webhook
+    if (deliveryMethods.webhook?.url) {
+        try {
+            await deliverWebhookAlarm(deliveryMethods.webhook.url, alarmDetails);
+            console.log('🔗 Webhook alarm sent successfully');
+        } catch (error) {
+            console.error('Failed to send webhook alarm:', error);
+        }
+    }
+}
+
+/**
+ * Send alarm via email
+ */
+async function deliverEmailAlarm(
+    addresses: string[],
+    alarmDetails: any
+): Promise<void> {
+    const subject = `KeepWatch Alert: ${alarmDetails.level} in ${alarmDetails.environment}`;
+
+    const emailContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background-color: rgb(14, 128, 134); color: white; padding: 20px; border-radius: 5px 5px 0 0;">
+                <h2 style="margin: 0;">Log Alarm Triggered</h2>
+            </div>
+            <div style="background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <a href="${alarmDetails.webUrl}" style="display: inline-block; background-color: rgb(14, 128, 134); color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">View Log Details</a>
+                </div>
+                <h3 style="color: #333; margin-top: 0;">Alert Details</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Log ID:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd; font-family: monospace;">${alarmDetails.logId}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Project:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.projectName} (${alarmDetails.projectId})</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Level:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><span style="background-color:rgb(14, 128, 134); color: white; padding: 2px 8px; border-radius: 3px;">${alarmDetails.level}</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Environment:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.environment}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Log Type:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.logType}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Timestamp:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.timestamp}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Hostname:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.hostname}</td>
+                    </tr>
+                </table>
+                
+                <h3 style="color: #333; margin-top: 20px;">Message</h3>
+                <div style="background-color: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">${alarmDetails.message}</div>
+                
+                ${alarmDetails.requestLines.length > 0 ? `
+                <h3 style="color: #333; margin-top: 20px;">Request</h3>
+                <div style="background-color: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 3px;">
+                    ${alarmDetails.requestLines.map((line: any) => `<div style="font-family:sans-serif;font-size:13px;padding:2px 0"><strong>${line.key}</strong>: ${line.value}</div>`).join('')}
+                </div>
+                ` : ''}
+                
+                ${alarmDetails.stackTrace !== 'None' ? `
+                <h3 style="color: #333; margin-top: 20px;">Stack Trace</h3>
+                <div style="background-color: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">${alarmDetails.stackTrace}</div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    await sendEmail(addresses, subject, emailContent);
+}
+
+/**
+ * Send alarm via Slack
+ */
+async function deliverSlackAlarm(
+    webhookUrl: string,
+    alarmDetails: any
+): Promise<void> {
+    const slack = slackNotify(webhookUrl);
+
+    const color = alarmDetails.level === 'ERROR' || alarmDetails.level === 'CRITICAL' ? 'danger' : 'warning';
+
+    await slack.send({
+        text: `🚨 *Log Alarm Triggered*\n<${alarmDetails.webUrl}|View Log Details>`,
+        attachments: [
+            {
+                fallback: `Log alarm triggered for ${alarmDetails.projectName}: ${alarmDetails.level} in ${alarmDetails.environment}`,
+                color: color,
+                fields: [
+                    {
+                        title: 'Log ID',
+                        value: alarmDetails.logId,
+                        short: false,
+                    },
+                    {
+                        title: 'Project',
+                        value: `${alarmDetails.projectName} (${alarmDetails.projectId})`,
+                        short: true,
+                    },
+                    {
+                        title: 'Level',
+                        value: alarmDetails.level,
+                        short: true,
+                    },
+                    {
+                        title: 'Environment',
+                        value: alarmDetails.environment,
+                        short: true,
+                    },
+                    {
+                        title: 'Log Type',
+                        value: alarmDetails.logType,
+                        short: true,
+                    },
+                    {
+                        title: 'Timestamp',
+                        value: alarmDetails.timestamp,
+                        short: false,
+                    },
+                    {
+                        title: 'Hostname',
+                        value: alarmDetails.hostname,
+                        short: true,
+                    },
+                    {
+                        title: 'Message',
+                        value: alarmDetails.message.substring(0, 500) + (alarmDetails.message.length > 500 ? '...' : ''),
+                        short: false,
+                    },
+                    ...(alarmDetails.requestLines.length > 0 ? [
+                        {
+                            title: 'Request',
+                            value: alarmDetails.requestLines.map((line: any) => `*${line.key}*: ${line.value}`).join('\n'),
+                            short: false,
+                        },
+                    ] : []),
+                ],
+            },
+        ],
+    });
+}
+
+/**
+ * Send alarm via webhook
+ */
+async function deliverWebhookAlarm(
+    webhookUrl: string,
+    alarmDetails: any
+): Promise<void> {
+    const payload = {
+        event: 'log.alarm',
+        timestamp: new Date().toISOString(),
+        alarm: alarmDetails,
+    };
+
+    const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'KeepWatch-Alarm/1.0',
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Webhook request failed with status ${response.status}`);
+    }
 }
 
 /**
@@ -82,6 +376,7 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
         level: logData.level,
         environment: logData.environment,
         projectId: logData.projectId,
+        request: logData.request,
         projectObjectId: projectDocId, // Store the Firestore document ID
         message: logData.message,
         logType: logData.logType,
@@ -121,6 +416,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
         projectId: doc.projectId || projectId,
         projectObjectId: projectDocId,
         message: doc.message,
+        request: doc.request,
         logType: doc.logType,
         stackTrace: doc.stackTrace || [],
         rawStackTrace: doc.rawStackTrace,
@@ -422,6 +718,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
                 ? logData.createdAt.getTime()
                 : Date.now(),
             hostname: 'hostname' in logData ? logData.hostname : undefined,
+            request: 'request' in logData ? logData.request : undefined
         };
 
         await typesenseClient.collections('logs').documents().create(document);

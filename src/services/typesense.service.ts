@@ -76,6 +76,11 @@ const logsCollectionSchema = {
             type: 'string' as const,
         },
         {
+            name: 'request',
+            type: 'object' as const,
+            optional: true,
+        },
+        {
             name: 'stackTrace',
             type: 'object[]' as const,
             optional: true,

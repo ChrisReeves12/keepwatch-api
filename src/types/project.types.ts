@@ -1,3 +1,5 @@
+import { LogType, LogLevel } from "./log.types";
+
 /**
  * Project user with role
  */
@@ -141,9 +143,9 @@ export interface AlarmDeliveryMethods {
  */
 export interface ProjectAlarm {
     id: string;
-    logType: 'Application Log' | 'System Log';
+    logType: LogType;
     message: string;
-    level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR' | 'CRITICAL';
+    level: LogLevel | LogLevel[];
     environment: string;
     deliveryMethods: AlarmDeliveryMethods;
 }
@@ -151,10 +153,4 @@ export interface ProjectAlarm {
 /**
  * Create alarm input
  */
-export interface CreateAlarmInput {
-    logType: 'Application Log' | 'System Log';
-    message: string;
-    level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR' | 'CRITICAL';
-    environment: string;
-    deliveryMethods: AlarmDeliveryMethods;
-}
+export type CreateAlarmInput = ProjectAlarm;

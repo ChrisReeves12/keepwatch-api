@@ -1566,8 +1566,14 @@ export const listProjectAlarms = async (req: Request, res: Response): Promise<vo
  *                 type: string
  *                 example: High CPU usage detected
  *               level:
- *                 type: string
- *                 enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 oneOf:
+ *                   - type: string
+ *                     enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                       enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 description: Log level(s) to match - can be a single string or array of strings
  *                 example: ERROR
  *               environment:
  *                 type: string
@@ -1690,7 +1696,7 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
         }
 
         // Validate logType
-        const validLogTypes = ['Application Log', 'System Log'];
+        const validLogTypes = ['application', 'system'];
         if (!validLogTypes.includes(alarmData.logType)) {
             res.status(400).json({
                 error: `Invalid logType. Must be one of: ${validLogTypes.join(', ')}`,
@@ -1698,11 +1704,35 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        // Validate level
+        // Validate level (supports both string and array)
         const validLevels = ['INFO', 'DEBUG', 'WARNING', 'ERROR', 'CRITICAL'];
-        if (!validLevels.includes(alarmData.level)) {
+        if (Array.isArray(alarmData.level)) {
+            // Validate array of levels
+            if (alarmData.level.length === 0) {
+                res.status(400).json({
+                    error: 'Level array cannot be empty',
+                });
+                return;
+            }
+            for (const level of alarmData.level) {
+                if (!validLevels.includes(level)) {
+                    res.status(400).json({
+                        error: `Invalid level: ${level}. Each level must be one of: ${validLevels.join(', ')}`,
+                    });
+                    return;
+                }
+            }
+        } else if (typeof alarmData.level === 'string') {
+            // Validate single level
+            if (!validLevels.includes(alarmData.level)) {
+                res.status(400).json({
+                    error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+                });
+                return;
+            }
+        } else {
             res.status(400).json({
-                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+                error: 'Invalid level. Must be a string or array of strings',
             });
             return;
         }
@@ -1800,12 +1830,32 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
             alarm = result.project.alarms[result.project.alarms.length - 1];
         } else if (result.updated && result.project.alarms) {
             // Existing alarm was updated - find it by matching fields
-            alarm = result.project.alarms.find(a =>
-                a.message.toLowerCase() === alarmData.message.toLowerCase() &&
-                a.environment.toLowerCase() === alarmData.environment.toLowerCase() &&
-                a.logType.toLowerCase() === alarmData.logType.toLowerCase() &&
-                a.level.toLowerCase() === alarmData.level.toLowerCase()
-            );
+            alarm = result.project.alarms.find(a => {
+                // Compare levels (handle both string and array)
+                const levelsMatch = (() => {
+                    const aLevel = a.level;
+                    const dataLevel = alarmData.level;
+                    
+                    // Both arrays
+                    if (Array.isArray(aLevel) && Array.isArray(dataLevel)) {
+                        return aLevel.length === dataLevel.length &&
+                            aLevel.every(l => dataLevel.includes(l));
+                    }
+                    
+                    // Both strings
+                    if (typeof aLevel === 'string' && typeof dataLevel === 'string') {
+                        return aLevel.toLowerCase() === dataLevel.toLowerCase();
+                    }
+                    
+                    // Different types
+                    return false;
+                })();
+                
+                return a.message.toLowerCase() === alarmData.message.toLowerCase() &&
+                    a.environment.toLowerCase() === alarmData.environment.toLowerCase() &&
+                    a.logType.toLowerCase() === alarmData.logType.toLowerCase() &&
+                    levelsMatch;
+            });
         }
 
         res.status(201).json({
@@ -1868,8 +1918,14 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
  *                 type: string
  *                 example: High CPU usage detected
  *               level:
- *                 type: string
- *                 enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 oneOf:
+ *                   - type: string
+ *                     enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                       enum: [INFO, DEBUG, WARNING, ERROR, CRITICAL]
+ *                 description: Log level(s) to match - can be a single string or array of strings
  *                 example: ERROR
  *               environment:
  *                 type: string
@@ -1991,7 +2047,7 @@ export const updateProjectAlarm = async (req: Request, res: Response): Promise<v
         }
 
         // Validate logType
-        const validLogTypes = ['Application Log', 'System Log'];
+        const validLogTypes = ['application', 'system'];
         if (!validLogTypes.includes(alarmData.logType)) {
             res.status(400).json({
                 error: `Invalid logType. Must be one of: ${validLogTypes.join(', ')}`,
@@ -1999,11 +2055,35 @@ export const updateProjectAlarm = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        // Validate level
+        // Validate level (supports both string and array)
         const validLevels = ['INFO', 'DEBUG', 'WARNING', 'ERROR', 'CRITICAL'];
-        if (!validLevels.includes(alarmData.level)) {
+        if (Array.isArray(alarmData.level)) {
+            // Validate array of levels
+            if (alarmData.level.length === 0) {
+                res.status(400).json({
+                    error: 'Level array cannot be empty',
+                });
+                return;
+            }
+            for (const level of alarmData.level) {
+                if (!validLevels.includes(level)) {
+                    res.status(400).json({
+                        error: `Invalid level: ${level}. Each level must be one of: ${validLevels.join(', ')}`,
+                    });
+                    return;
+                }
+            }
+        } else if (typeof alarmData.level === 'string') {
+            // Validate single level
+            if (!validLevels.includes(alarmData.level)) {
+                res.status(400).json({
+                    error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+                });
+                return;
+            }
+        } else {
             res.status(400).json({
-                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`,
+                error: 'Invalid level. Must be a string or array of strings',
             });
             return;
         }

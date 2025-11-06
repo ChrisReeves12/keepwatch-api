@@ -1,4 +1,4 @@
-import { http, cloudEvent } from '@google-cloud/functions-framework';
+import { cloudEvent } from '@google-cloud/functions-framework';
 import { processLogIngestion } from './log-ingestion-function';
 
 // Register the Cloud Function with the Functions Framework
