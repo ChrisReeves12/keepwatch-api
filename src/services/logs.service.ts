@@ -3,7 +3,7 @@ import moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
 import { Log, CreateLogInput, MessageFilter, DocFilter } from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
-import { findProjectByProjectId } from './projects.service';
+import { findProjectByProjectId, findCachedProjectById } from './projects.service';
 import { sendEmail } from './mail.service';
 import slackNotify from 'slack-notify';
 import { ProjectAlarm } from '../types/project.types';
@@ -39,8 +39,8 @@ export async function storeLogMessage(logData: CreateLogInput): Promise<Log> {
 export async function processLogAlarm(logData: CreateLogInput, logId: string): Promise<void> {
     console.log(`🔔 Processing log alarm for project: ${logData.projectId}, level: ${logData.level}, logId: ${logId}`);
 
-    // Fetch the project record
-    const project = await findProjectByProjectId(logData.projectId);
+
+    const project = await findCachedProjectById(logData.projectId);
     if (!project) {
         return;
     }
@@ -367,13 +367,12 @@ export async function createLogIndexes(): Promise<void> {
 export async function createLog(logData: CreateLogInput): Promise<Log> {
     const collection = getLogsCollection();
 
-    // Look up project by projectId (string slug) to get its document ID
-    const project = await findProjectByProjectId(logData.projectId);
+    const project = await findCachedProjectById(logData.projectId);
     if (!project || !project._id) {
         throw new Error('Project not found');
     }
 
-    const projectDocId = typeof project._id === 'string' ? project._id : project._id;
+    const projectDocId = project._id;
 
     const now = new Date();
     const log: Omit<Log, '_id'> = {
@@ -406,13 +405,12 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
  * @returns Log object
  */
 async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
-    // Look up project to get its document ID
-    const project = await findProjectByProjectId(doc.projectId || projectId);
+    const project = await findCachedProjectById(doc.projectId || projectId);
     if (!project || !project._id) {
         throw new Error(`Project not found: ${doc.projectId || projectId}`);
     }
 
-    const projectDocId = typeof project._id === 'string' ? project._id : project._id;
+    const projectDocId = project._id;
 
     return {
         level: doc.level,

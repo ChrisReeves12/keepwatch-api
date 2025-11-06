@@ -4,7 +4,7 @@ import * as ipaddr from 'ipaddr.js';
 import { getFirestore, serverTimestamp, arrayUnion, arrayRemove } from '../database/firestore.connection';
 import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey, UpdateApiKeyInput, ApiKeyConstraints, CreateAlarmInput, ProjectAlarm } from '../types/project.types';
 import { slugify } from '../utils/slugify.util';
-import { getCache, setCache } from './redis.service';
+import { getCache, setCache, deleteCache } from './redis.service';
 import { deleteLogsByProjectId } from './logs.service';
 
 const COLLECTION_NAME = 'projects';
@@ -641,6 +641,40 @@ export async function findProjectByProjectId(projectId: string): Promise<Project
 }
 
 /**
+ * Find a cached project by projectId
+ * Cache TTL is 5 minutes (300 seconds)
+ * @param projectId - The unique projectId identifier
+ * @returns Project document or null
+ */
+export async function findCachedProjectById(projectId: string): Promise<Project | null> {
+    const cacheKey = `project:${projectId}`;
+
+    try {
+        const cachedProject = await getCache<Project>(cacheKey);
+        if (cachedProject) {
+            console.log(`Project cache hit for: ${projectId}`);
+            return cachedProject;
+        }
+    } catch (error) {
+        console.error('Failed to get project from cache:', error);
+    }
+
+    console.log(`Project cache miss for: ${projectId}, fetching from database`);
+
+    const project = await findProjectByProjectId(projectId);
+
+    if (project) {
+        try {
+            await setCache(cacheKey, project, 300); // 5 minutes TTL
+        } catch (error) {
+            console.error('Failed to cache project:', error);
+        }
+    }
+
+    return project;
+}
+
+/**
  * Find a project by Firestore document _id
  * @param id - Firestore document ID string
  * @returns Project document or null
@@ -730,6 +764,9 @@ export async function updateProject(projectId: string, updateData: UpdateProject
         updatedAt: new Date(),
     });
 
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
+
     const updatedDoc = await docRef.get();
     return toProject(updatedDoc);
 }
@@ -753,6 +790,10 @@ export async function deleteProject(projectId: string): Promise<boolean> {
 
     // Delete the project
     await snapshot.docs[0].ref.delete();
+
+    // Invalidate cache after deletion
+    await deleteCache(`project:${projectId}`);
+
     console.log(`✅ Deleted project: ${projectId}`);
 
     return true;
@@ -854,6 +895,9 @@ export async function createProjectApiKey(projectId: string): Promise<ProjectApi
         updatedAt: now,
     });
 
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
+
     return newApiKey;
 }
 
@@ -904,6 +948,9 @@ export async function deleteProjectApiKey(projectId: string, apiKeyId: string): 
         apiKeys: arrayRemove(apiKeyToRemove),
         updatedAt: new Date(),
     });
+
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
 
     return true;
 }
@@ -980,6 +1027,9 @@ export async function updateUserRoleOnProject(
         updatedAt: new Date(),
     });
 
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
+
     const updatedDoc = await docRef.get();
     return toProject(updatedDoc);
 }
@@ -1041,9 +1091,10 @@ export async function updateApiKey(
         updatedAt: new Date(),
     });
 
-    // Invalidate cache for this API key
+    // Invalidate cache for both the project and the API key
+    await deleteCache(`project:${projectId}`);
     const cacheKey = `project:api-key:${existingApiKey.key}`;
-    await setCache(cacheKey, null, 1); // Set to expire immediately
+    await deleteCache(cacheKey);
 
     return updatedApiKeys[apiKeyIndex];
 }
@@ -1087,6 +1138,9 @@ export async function removeUserFromProject(
         users: updatedUsers,
         updatedAt: new Date(),
     });
+
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
 
     const updatedDoc = await docRef.get();
     return toProject(updatedDoc);
@@ -1190,6 +1244,9 @@ export async function addAlarmToProject(
             updatedAt: new Date(),
         });
 
+        // Invalidate cache after update
+        await deleteCache(`project:${projectId}`);
+
         const updatedDoc = await docRef.get();
         return { added: false, updated: true, project: toProject(updatedDoc) };
     }
@@ -1209,6 +1266,9 @@ export async function addAlarmToProject(
         alarms: arrayUnion(newAlarm),
         updatedAt: new Date(),
     });
+
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
 
     const updatedDoc = await docRef.get();
     return { added: true, updated: false, project: toProject(updatedDoc) };
@@ -1278,6 +1338,9 @@ export async function updateAlarmById(
         updatedAt: new Date(),
     });
 
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
+
     return updatedAlarms[alarmIndex];
 }
 
@@ -1323,6 +1386,9 @@ export async function deleteProjectAlarm(projectId: string, alarmId?: string): P
             updatedAt: new Date(),
         });
     }
+
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
 
     return true;
 }
