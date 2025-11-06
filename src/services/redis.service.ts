@@ -123,11 +123,13 @@ export async function closeRedisConnection(): Promise<void> {
  */
 export async function setCache(key: string, value: any, ttlSeconds: number): Promise<void> {
     if (!isCachingEnabled()) {
+        console.log('⚠️  Caching is disabled, skipping setCache');
         return;
     }
 
     const client = getRedisClient();
     if (!client) {
+        console.log('⚠️  Redis client not available, skipping setCache');
         return;
     }
 
@@ -136,7 +138,7 @@ export async function setCache(key: string, value: any, ttlSeconds: number): Pro
         const serializedValue = JSON.stringify(value);
         await client.setex(prefixedKey, ttlSeconds, serializedValue);
     } catch (error) {
-        console.error('Failed to set cache:', error);
+        console.error('❌ Failed to set cache:', error);
     }
 }
 
@@ -147,11 +149,13 @@ export async function setCache(key: string, value: any, ttlSeconds: number): Pro
  */
 export async function getCache<T>(key: string): Promise<T | null> {
     if (!isCachingEnabled()) {
+        console.log('⚠️  Caching is disabled, skipping getCache');
         return null;
     }
 
     const client = getRedisClient();
     if (!client) {
+        console.log('⚠️  Redis client not available, skipping getCache');
         return null;
     }
 
@@ -163,7 +167,7 @@ export async function getCache<T>(key: string): Promise<T | null> {
         }
         return JSON.parse(value) as T;
     } catch (error) {
-        console.error('Failed to get cache:', error);
+        console.error('❌ Failed to get cache:', error);
         return null;
     }
 }

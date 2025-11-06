@@ -656,7 +656,7 @@ export async function findCachedProjectById(projectId: string): Promise<Project 
             return cachedProject;
         }
     } catch (error) {
-        console.error('Failed to get project from cache:', error);
+        console.error('❌ Failed to get project from cache:', error);
     }
 
     console.log(`Project cache miss for: ${projectId}, fetching from database`);
@@ -665,9 +665,11 @@ export async function findCachedProjectById(projectId: string): Promise<Project 
 
     if (project) {
         try {
+            console.log(`Caching project: ${projectId}`);
             await setCache(cacheKey, project, 300); // 5 minutes TTL
+            console.log(`Successfully cached project: ${projectId}`);
         } catch (error) {
-            console.error('Failed to cache project:', error);
+            console.error('❌ Failed to cache project:', error);
         }
     }
 

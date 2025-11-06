@@ -3,6 +3,7 @@ import { PubSub } from '@google-cloud/pubsub';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
+import { connectToRedis, isCachingEnabled } from '../services/redis.service';
 import { storeLogMessage } from '../services/logs.service';
 import { LOG_INGESTION_TOPIC, LOG_INGESTION_SUBSCRIPTION, LOG_ALARM_TOPIC } from '../constants';
 
@@ -17,6 +18,16 @@ async function initialize() {
     // Initialize external services
     await connectToFirestore();
     await createLogsTypesenseCollection();
+
+    // Connect to Redis if caching is enabled
+    if (isCachingEnabled()) {
+        try {
+            await connectToRedis();
+        } catch (error) {
+            console.warn('⚠️  Redis connection failed, continuing without cache:', error);
+        }
+    }
+
     console.log('✅ External services connected for worker.');
 
     // The PubSub constructor automatically detects PUBSUB_EMULATOR_HOST

@@ -1,5 +1,6 @@
 import { PubSub } from "@google-cloud/pubsub";
 import { connectToFirestore } from "../database/firestore.connection";
+import { connectToRedis, isCachingEnabled } from "../services/redis.service";
 import { LOG_ALARM_TOPIC, LOG_ALARM_SUBSCRIPTION } from "../constants";
 import { CreateLogInput } from "../types/log.types";
 import { processLogAlarm } from "../services/logs.service";
@@ -9,6 +10,16 @@ async function initialize() {
 
     // Initialize external services
     await connectToFirestore();
+
+    // Connect to Redis if caching is enabled
+    if (isCachingEnabled()) {
+        try {
+            await connectToRedis();
+        } catch (error) {
+            console.warn('⚠️  Redis connection failed, continuing without cache:', error);
+        }
+    }
+
     console.log('✅ External services connected for log alarm worker.');
 
     // The PubSub constructor automatically detects PUBSUB_EMULATOR_HOST
