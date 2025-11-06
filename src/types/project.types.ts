@@ -144,7 +144,7 @@ export interface AlarmDeliveryMethods {
 export interface ProjectAlarm {
     id: string;
     logType: LogType;
-    message: string;
+    message?: string; // null or undefined means "match any message"
     level: LogLevel | LogLevel[];
     environment: string;
     deliveryMethods: AlarmDeliveryMethods;

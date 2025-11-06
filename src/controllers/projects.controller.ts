@@ -1553,7 +1553,6 @@ export const listProjectAlarms = async (req: Request, res: Response): Promise<vo
  *             type: object
  *             required:
  *               - logType
- *               - message
  *               - level
  *               - environment
  *               - deliveryMethods
@@ -1564,6 +1563,8 @@ export const listProjectAlarms = async (req: Request, res: Response): Promise<vo
  *                 example: Application Log
  *               message:
  *                 type: string
+ *                 nullable: true
+ *                 description: Message pattern to match (use null/undefined to match any message)
  *                 example: High CPU usage detected
  *               level:
  *                 oneOf:
@@ -1667,11 +1668,9 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        if (!alarmData.message || typeof alarmData.message !== 'string' || !alarmData.message.trim()) {
-            res.status(400).json({
-                error: 'Missing or invalid required field: message',
-            });
-            return;
+        // Empty message means "match all"
+        if (!alarmData.message) {
+            alarmData.message = undefined;
         }
 
         if (!alarmData.level) {
@@ -1835,23 +1834,39 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
                 const levelsMatch = (() => {
                     const aLevel = a.level;
                     const dataLevel = alarmData.level;
-                    
+
                     // Both arrays
                     if (Array.isArray(aLevel) && Array.isArray(dataLevel)) {
                         return aLevel.length === dataLevel.length &&
                             aLevel.every(l => dataLevel.includes(l));
                     }
-                    
+
                     // Both strings
                     if (typeof aLevel === 'string' && typeof dataLevel === 'string') {
                         return aLevel.toLowerCase() === dataLevel.toLowerCase();
                     }
-                    
+
                     // Different types
                     return false;
                 })();
-                
-                return a.message.toLowerCase() === alarmData.message.toLowerCase() &&
+
+                // Compare messages (handle null which means "match any message")
+                const messagesMatch = (() => {
+                    // Both empty
+                    if (!a.message && !alarmData.message) {
+                        return true;
+                    }
+
+                    // One null, one not
+                    if (!a.message || !alarmData.message) {
+                        return false;
+                    }
+
+                    // Both strings
+                    return String(a.message).toLowerCase() === String(alarmData.message).toLowerCase();
+                })();
+
+                return messagesMatch &&
                     a.environment.toLowerCase() === alarmData.environment.toLowerCase() &&
                     a.logType.toLowerCase() === alarmData.logType.toLowerCase() &&
                     levelsMatch;
@@ -1905,7 +1920,6 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
  *             type: object
  *             required:
  *               - logType
- *               - message
  *               - level
  *               - environment
  *               - deliveryMethods
@@ -1916,6 +1930,8 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
  *                 example: Application Log
  *               message:
  *                 type: string
+ *                 nullable: true
+ *                 description: Message pattern to match (use null to match any message)
  *                 example: High CPU usage detected
  *               level:
  *                 oneOf:
@@ -2018,9 +2034,10 @@ export const updateProjectAlarm = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        if (!alarmData.message || typeof alarmData.message !== 'string' || !alarmData.message.trim()) {
+        // Message can be a string or null (null means "match any message")
+        if (alarmData.message !== null && (typeof alarmData.message !== 'string' || !alarmData.message.trim())) {
             res.status(400).json({
-                error: 'Missing or invalid required field: message',
+                error: 'Invalid message field: must be a non-empty string or null',
             });
             return;
         }

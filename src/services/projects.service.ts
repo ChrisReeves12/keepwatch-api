@@ -1104,23 +1104,39 @@ function findMatchingAlarm(existingAlarms: ProjectAlarm[], newAlarm: CreateAlarm
         const levelsMatch = (() => {
             const existingLevel = existing.level;
             const newLevel = newAlarm.level;
-            
+
             // Both arrays
             if (Array.isArray(existingLevel) && Array.isArray(newLevel)) {
                 return existingLevel.length === newLevel.length &&
                     existingLevel.every(l => newLevel.includes(l));
             }
-            
+
             // Both strings
             if (typeof existingLevel === 'string' && typeof newLevel === 'string') {
                 return existingLevel.toLowerCase() === newLevel.toLowerCase();
             }
-            
+
             // Different types
             return false;
         })();
-        
-        return existing.message.toLowerCase() === newAlarm.message.toLowerCase() &&
+
+        // Compare messages (handle null which means "match any message")
+        const messagesMatch = (() => {
+            // Both null
+            if (!existing.message && !newAlarm.message) {
+                return true;
+            }
+
+            // One null, one not
+            if (!existing.message || !newAlarm.message) {
+                return false;
+            }
+
+            // Both strings
+            return String(existing.message).toLowerCase() === String(existing.message).toLowerCase();
+        })();
+
+        return messagesMatch &&
             existing.environment.toLowerCase() === newAlarm.environment.toLowerCase() &&
             existing.logType.toLowerCase() === newAlarm.logType.toLowerCase() &&
             levelsMatch;
@@ -1182,7 +1198,7 @@ export async function addAlarmToProject(
     const newAlarm: ProjectAlarm = {
         id: randomUUID(),
         logType: alarmData.logType,
-        message: alarmData.message.trim(),
+        message: alarmData.message?.trim(),
         level: alarmData.level,
         environment: alarmData.environment.trim(),
         deliveryMethods: alarmData.deliveryMethods,
@@ -1250,7 +1266,7 @@ export async function updateAlarmById(
     updatedAlarms[alarmIndex] = {
         id: alarmId, // Keep the original ID
         logType: alarmData.logType,
-        message: alarmData.message.trim(),
+        message: alarmData.message?.trim(),
         level: alarmData.level,
         environment: alarmData.environment.trim(),
         deliveryMethods: alarmData.deliveryMethods,

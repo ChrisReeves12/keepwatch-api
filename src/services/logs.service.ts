@@ -54,14 +54,18 @@ export async function processLogAlarm(logData: CreateLogInput, logId: string): P
     for (const alarm of alarms) {
         // Check if the log matches the alarm criteria
         const logTypeMatches = alarm.logType === logData.logType;
-        
+
         // Handle both single string and array of strings for level
         const levelMatches = Array.isArray(alarm.level)
             ? alarm.level.includes(logData.level.toUpperCase() as any)
             : alarm.level === logData.level.toUpperCase();
-        
+
         const environmentMatches = alarm.environment.toLowerCase() === logData.environment.toLowerCase();
-        const messageMatches = logData.message.toLowerCase().includes(alarm.message.toLowerCase());
+
+        // Handle null message (null means "match any message")
+        const messageMatches = !alarm.message
+            ? true
+            : logData.message.toLowerCase().includes(alarm.message.toLowerCase());
 
         if (logTypeMatches && levelMatches && environmentMatches && messageMatches) {
             await deliverAlarm(alarm, logData, project.name, logId);
