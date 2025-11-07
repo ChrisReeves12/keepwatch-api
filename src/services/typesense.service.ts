@@ -47,6 +47,11 @@ const logsCollectionSchema = {
             type: 'string' as const,
         },
         {
+            name: 'firestoreId',
+            type: 'string' as const,
+            optional: true,
+        },
+        {
             name: 'logType',
             type: 'string' as const,
             facet: true,

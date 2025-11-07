@@ -767,6 +767,155 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
 
 /**
  * @swagger
+ * /api/v1/logs/{projectId}/{logType}/environments:
+ *   get:
+ *     summary: Get all unique environment values for a project and log type
+ *     description: Returns all unique environment values with their counts for a specific project and log type using Typesense facet search. Requires JWT authentication via Bearer token. The user must be a member of the project.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: logType
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [application, system]
+ *         description: Log type to filter by (application or system)
+ *     responses:
+ *       200:
+ *         description: Environments retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 environments:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       value:
+ *                         type: string
+ *                         example: production
+ *                       count:
+ *                         type: integer
+ *                         example: 1523
+ *       400:
+ *         description: Invalid logType parameter
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getEnvironmentsByProjectAndLogType = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Verify JWT authentication
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get projectId and logType from path params
+        const { projectId, logType } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
+
+        if (!logType) {
+            res.status(400).json({
+                error: 'Missing required path parameter: logType',
+            });
+            return;
+        }
+
+        // Validate logType
+        if (logType !== 'application' && logType !== 'system') {
+            res.status(400).json({
+                error: 'logType must be either "application" or "system"',
+            });
+            return;
+        }
+
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is a member of the project (any role)
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Get environments using facet search
+        const environments = await LogsService.getEnvironmentsByProjectAndLogType(projectId, logType);
+
+        res.json({
+            environments,
+        });
+    } catch (error: any) {
+        console.error('Error fetching environments:', error);
+        res.status(500).json({
+            error: 'Failed to fetch environments',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
  * /api/v1/logs/{projectId}:
  *   delete:
  *     summary: Purge logs for a project
@@ -944,6 +1093,140 @@ export const purgeProjectLogs = async (req: Request, res: Response): Promise<voi
         console.error('Error purging logs:', error);
         res.status(500).json({
             error: 'Failed to purge logs',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/logs/{projectId}/{logId}:
+ *   get:
+ *     summary: Get a single log by ID
+ *     description: Retrieve a single log by its ID. Requires JWT authentication via Bearer token. The user must be a member of the project.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: logId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Log document ID
+ *     responses:
+ *       200:
+ *         description: Log retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Log'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project, user, or log not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getLogById = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Verify JWT authentication
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get projectId and logId from path params
+        const { projectId, logId } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
+
+        if (!logId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: logId',
+            });
+            return;
+        }
+
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is a member of the project (any role)
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Fetch the log by ID
+        const log = await LogsService.findLogById(logId);
+        if (!log) {
+            res.status(404).json({
+                error: 'Log not found',
+            });
+            return;
+        }
+
+        // Verify the log belongs to the requested project
+        if (log.projectId !== projectId) {
+            res.status(403).json({
+                error: 'Forbidden: This log does not belong to the specified project',
+            });
+            return;
+        }
+
+        res.json(log);
+    } catch (error: any) {
+        console.error('Error fetching log:', error);
+        res.status(500).json({
+            error: 'Failed to fetch log',
             details: error.message,
         });
     }

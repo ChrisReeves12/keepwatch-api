@@ -24,8 +24,8 @@ export async function storeLogMessage(logData: CreateLogInput): Promise<Log> {
     // Save to Firestore first to get the log ID
     const log = await createLog(logData);
 
-    // Then index in Typesense
-    await indexLogInSearch(logData);
+    // Then index in Typesense (pass the log with _id)
+    await indexLogInSearch(log);
 
     console.log('✅ Log processed successfully');
     return log;
@@ -105,7 +105,7 @@ async function deliverAlarm(
     const requestLines = formatRequestForDisplay(logData.request);
 
     // Construct frontend URL
-    const webUrl = `${process.env.WEB_FRONTEND_URL}/projects/${logData.projectId}/${logId}`;
+    const webUrl = `${process.env.WEB_FRONTEND_URL}/project/${logData.projectId}/logs/${logId}`;
 
     // Prepare alarm details for delivery
     const alarmDetails = {
@@ -171,7 +171,7 @@ async function deliverEmailAlarm(
             </div>
             <div style="background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
                 <div style="text-align: center; margin-bottom: 20px;">
-                    <a href="${alarmDetails.webUrl}" style="display: inline-block; background-color: rgb(14, 128, 134); color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">View Log Details</a>
+                    <a href="${alarmDetails.webUrl}" style="display: inline-block; background-color: rgb(14, 128, 134); color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">View In KeepWatch</a>
                 </div>
                 <h3 style="color: #333; margin-top: 0;">Alert Details</h3>
                 <table style="width: 100%; border-collapse: collapse;">
@@ -238,7 +238,7 @@ async function deliverSlackAlarm(
     const color = alarmDetails.level === 'ERROR' || alarmDetails.level === 'CRITICAL' ? 'danger' : 'warning';
 
     await slack.send({
-        text: `🚨 *Log Alarm Triggered*\n<${alarmDetails.webUrl}|View Log Details>`,
+        text: `🚨 *Log Alarm Triggered*\n<${alarmDetails.webUrl}|View In KeepWatch>`,
         attachments: [
             {
                 fallback: `Log alarm triggered for ${alarmDetails.projectName}: ${alarmDetails.level} in ${alarmDetails.environment}`,
@@ -413,6 +413,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
     const projectDocId = project._id;
 
     return {
+        _id: doc.firestoreId, // Include the Firestore document ID
         level: doc.level,
         environment: doc.environment,
         projectId: doc.projectId || projectId,
@@ -703,9 +704,10 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
         const typesenseClient = getTypesenseClient();
 
         // Convert log to Typesense document format
-        // Generate a UUID for the Typesense document ID (we don't use Firestore _id)
+        // Use a UUID for Typesense's internal ID, but store the Firestore _id for retrieval
         const document = {
             id: randomUUID(),
+            firestoreId: '_id' in logData ? logData._id : undefined, // Store Firestore document ID
             level: logData.level,
             environment: logData.environment,
             projectId: logData.projectId,
@@ -1009,4 +1011,46 @@ export function parseTimeFilters(
 
     // No time filters
     return {};
+}
+
+/**
+ * Get all unique environment values for a project and log type using Typesense facet search
+ * @param projectId - The projectId to get environments for
+ * @param logType - The log type to filter by ("application" or "system")
+ * @returns Array of unique environment names with their counts
+ */
+export async function getEnvironmentsByProjectAndLogType(
+    projectId: string,
+    logType: string
+): Promise<Array<{ value: string; count: number }>> {
+    const typesenseClient = getTypesenseClient();
+
+    // Build filter_by clause
+    const filterBy = `projectId:${projectId} && logType:${logType}`;
+
+    // Execute facet search
+    const searchResults = await typesenseClient
+        .collections('logs')
+        .documents()
+        .search({
+            q: '*',
+            query_by: 'message',
+            filter_by: filterBy,
+            facet_by: 'environment',
+            per_page: 0, // We only need facet results, not documents
+        });
+
+    // Extract facet counts from results
+    const facetCounts = searchResults.facet_counts || [];
+    const environmentFacet = facetCounts.find((facet: any) => facet.field_name === 'environment');
+
+    if (!environmentFacet || !environmentFacet.counts) {
+        return [];
+    }
+
+    // Map to our return format
+    return environmentFacet.counts.map((count: any) => ({
+        value: count.value,
+        count: count.count,
+    }));
 }
