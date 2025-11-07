@@ -1,14 +1,39 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import moment from 'moment';
 import { getFirestore } from '../database/firestore.connection';
-import { Log, CreateLogInput, MessageFilter, DocFilter } from '../types/log.types';
+import {Log, CreateLogInput, MessageFilter, DocFilter, LogType, LogLevel} from '../types/log.types';
 import { getTypesenseClient, isTypesenseEnabled } from './typesense.service';
 import { findProjectByProjectId, findCachedProjectById } from './projects.service';
 import { sendEmail } from './mail.service';
 import slackNotify from 'slack-notify';
 import { ProjectAlarm } from '../types/project.types';
+import { getCache, setCache, isCachingEnabled } from './redis.service';
+import { LOG_ALARM_DEBOUNCE_SECONDS } from '../constants';
 
 const COLLECTION_NAME = 'logs';
+
+/**
+ * Generate a unique debounce key for a log alarm based on project, environment, level, and message
+ * @param logType - The log Type
+ * @param projectId - The project ID
+ * @param environment - The environment name
+ * @param level - The log level
+ * @param message - The log message
+ * @returns A unique key string for Redis storage
+ */
+function generateAlarmDebounceKey(
+    logType: LogType,
+    projectId: string,
+    environment: string,
+    level: LogLevel,
+    message: string
+): string {
+    const messageHash = !message ? '---' : createHash('sha256').update(message).digest('hex').substring(0, 24);
+    const normalizedEnv = environment.toLowerCase();
+    const normalizedLevel = level.toUpperCase();
+
+    return `alarm:debounce:${projectId}:${logType}:${normalizedEnv}:${normalizedLevel}:${messageHash}`;
+}
 
 /**
  * Process a log message by saving it to Firestore and indexing in Typesense.
@@ -88,6 +113,25 @@ async function deliverAlarm(
     projectName: string,
     logId: string
 ): Promise<void> {
+    // Check if this alarm was recently sent (debouncing)
+    if (isCachingEnabled()) {
+        const debounceKey = generateAlarmDebounceKey(
+            logData.logType,
+            logData.projectId,
+            logData.environment,
+            logData.level as LogLevel,
+            logData.message || ''
+        );
+
+        const existingAlert = await getCache<string>(debounceKey);
+        if (existingAlert) {
+            console.log(`Skipping duplicate alarm (debounced): ${debounceKey}`);
+            return;
+        }
+
+        await setCache(debounceKey, 'sent', LOG_ALARM_DEBOUNCE_SECONDS);
+    }
+
     const deliveryMethods = alarm.deliveryMethods;
 
     // Format request object as key-value pairs (only non-empty values)
