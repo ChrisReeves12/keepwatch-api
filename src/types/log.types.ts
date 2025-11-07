@@ -113,6 +113,7 @@ export interface QueryLogsRequest {
     hostname?: string | string[]; // Filter by hostname(s) - can be a single string or array of strings
     startTime?: number; // Unix timestamp in milliseconds - start of time range
     endTime?: number; // Unix timestamp in milliseconds - end of time range
+    sortOrder?: 'asc' | 'desc'; // Sort order for timestampMS - defaults to 'desc'
     docFilter?: DocFilter;
     message?: MessageFilter;
     stackTrace?: MessageFilter;

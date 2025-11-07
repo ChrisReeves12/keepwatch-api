@@ -486,6 +486,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
  * @param hostname - Optional filter by hostname(s) - can be a single string or array of strings
  * @param startTime - Optional start time filter (Unix timestamp in milliseconds)
  * @param endTime - Optional end time filter (Unix timestamp in milliseconds)
+ * @param sortOrder - Optional sort order for timestampMS - 'asc' or 'desc' (defaults to 'desc')
  * @param docFilter - Optional document-wide filter (searches across message, rawStackTrace, and detailString)
  * @param messageFilter - Optional message filter with AND/OR logic
  * @param stackTraceFilter - Optional stack trace filter with AND/OR logic
@@ -502,6 +503,7 @@ export async function getLogsByProjectId(
     hostname?: string | string[],
     startTime?: number,
     endTime?: number,
+    sortOrder: 'asc' | 'desc' = 'desc',
     docFilter?: DocFilter,
     messageFilter?: MessageFilter,
     stackTraceFilter?: MessageFilter,
@@ -688,7 +690,7 @@ export async function getLogsByProjectId(
 
     // Only sort by timestamp if not using text-based search (sort by relevance when searching)
     if (!useTextSearch) {
-        searchParameters.sort_by = 'timestampMS:desc';
+        searchParameters.sort_by = `timestampMS:${sortOrder}`;
     }
 
     if (queryBy) {

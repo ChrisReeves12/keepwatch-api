@@ -224,6 +224,11 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                 format: int64
  *                 description: End of time range filter (Unix timestamp in milliseconds). If not provided, logs from all time are included.
  *                 example: 1640995199999
+ *               sortOrder:
+ *                 type: string
+ *                 enum: [asc, desc]
+ *                 default: desc
+ *                 description: Sort order for timestampMS - 'asc' for ascending (oldest first) or 'desc' for descending (newest first). Defaults to 'desc'.
  *               docFilter:
  *                 type: object
  *                 description: Document-wide filter that searches across message, rawStackTrace, and detailString. If provided, this nullifies message, stackTrace, and details filters.
@@ -510,6 +515,7 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
         const hostname = requestBody.hostname;
         const startTime = requestBody.startTime;
         const endTime = requestBody.endTime;
+        const sortOrder = requestBody.sortOrder ?? 'desc';
         const docFilter = requestBody.docFilter;
         const messageFilter = requestBody.message;
         const stackTraceFilter = requestBody.stackTrace;
@@ -655,6 +661,14 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             return;
         }
 
+        // Validate sortOrder if provided
+        if (sortOrder !== undefined && sortOrder !== 'asc' && sortOrder !== 'desc') {
+            res.status(400).json({
+                error: 'sortOrder must be either "asc" or "desc"',
+            });
+            return;
+        }
+
         // Validate docFilter if provided
         if (docFilter !== undefined) {
             if (!docFilter.phrase || typeof docFilter.phrase !== 'string') {
@@ -741,6 +755,7 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             hostname,
             startTime,
             endTime,
+            sortOrder,
             docFilter,
             docFilter ? undefined : messageFilter,
             docFilter ? undefined : stackTraceFilter,
