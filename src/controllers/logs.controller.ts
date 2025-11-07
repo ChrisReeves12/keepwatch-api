@@ -919,7 +919,7 @@ export const getEnvironmentsByProjectAndLogType = async (req: Request, res: Resp
  * /api/v1/logs/{projectId}:
  *   delete:
  *     summary: Purge logs for a project
- *     description: Delete logs for a project with optional filters. Only admins can delete logs. Supports filtering by time range, lookback time, environment, and level.
+ *     description: Delete logs for a project with optional filters or by specific log IDs. Only admins can delete logs. Supports filtering by time range, lookback time, environment, and level, OR deleting specific logs by ID.
  *     tags: [Logs]
  *     security:
  *       - bearerAuth: []
@@ -934,22 +934,35 @@ export const getEnvironmentsByProjectAndLogType = async (req: Request, res: Resp
  *         name: lookbackTime
  *         schema:
  *           type: string
- *         description: Delete logs older than this lookback time (e.g., "5d", "2h", "10m", "3months")
+ *         description: Delete logs older than this lookback time (e.g., "5d", "2h", "10m", "3months"). Ignored if logIds are provided in the body.
  *       - in: query
  *         name: timeRange
  *         schema:
  *           type: string
- *         description: Delete logs within this time range (e.g., "2024-01-01 to 2024-01-31" or "2024-01-01-12:00:00 to 2024-01-31-23:59:59")
+ *         description: Delete logs within this time range (e.g., "2024-01-01 to 2024-01-31" or "2024-01-01-12:00:00 to 2024-01-31-23:59:59"). Ignored if logIds are provided in the body.
  *       - in: query
  *         name: env
  *         schema:
  *           type: string
- *         description: Filter by environment name
+ *         description: Filter by environment name. Ignored if logIds are provided in the body.
  *       - in: query
  *         name: level
  *         schema:
  *           type: string
- *         description: Filter by log level (e.g., error, warn, info, debug)
+ *         description: Filter by log level (e.g., error, warn, info, debug). Ignored if logIds are provided in the body.
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               logIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of log IDs to delete. If provided, query parameters are ignored.
+ *                 example: ["log-id-1", "log-id-2", "log-id-3"]
  *     responses:
  *       200:
  *         description: Logs purged successfully
@@ -965,7 +978,7 @@ export const getEnvironmentsByProjectAndLogType = async (req: Request, res: Resp
  *                   type: number
  *                   example: 150
  *       400:
- *         description: Invalid query parameters
+ *         description: Invalid query parameters or request body
  *         content:
  *           application/json:
  *             schema:
@@ -1041,6 +1054,44 @@ export const purgeProjectLogs = async (req: Request, res: Response): Promise<voi
             return;
         }
 
+        // Check if logIds are provided in the request body
+        const { logIds } = req.body || {};
+        
+        if (logIds && Array.isArray(logIds)) {
+            // Delete by log IDs
+            if (logIds.length === 0) {
+                res.status(400).json({
+                    error: 'logIds array cannot be empty',
+                });
+                return;
+            }
+
+            if (logIds.length > 1000) {
+                res.status(400).json({
+                    error: 'Cannot delete more than 1000 logs at once',
+                });
+                return;
+            }
+
+            // Validate that all logIds are strings
+            if (!logIds.every((id: any) => typeof id === 'string')) {
+                res.status(400).json({
+                    error: 'All logIds must be strings',
+                });
+                return;
+            }
+
+            // Delete logs by IDs
+            const result = await LogsService.deleteLogsByIds(projectId, logIds);
+
+            res.json({
+                message: 'Logs purged successfully',
+                deletedCount: result.deletedCount,
+            });
+            return;
+        }
+
+        // Otherwise, use filter-based deletion
         // Parse query parameters
         const lookbackTime = req.query.lookbackTime as string | undefined;
         const timeRange = req.query.timeRange as string | undefined;

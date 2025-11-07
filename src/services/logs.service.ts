@@ -975,6 +975,86 @@ export async function deleteLogsByProjectId(
 }
 
 /**
+ * Delete logs by their Firestore document IDs
+ * @param projectId - The projectId to verify logs belong to
+ * @param logIds - Array of Firestore document IDs to delete
+ * @returns Number of logs deleted
+ */
+export async function deleteLogsByIds(
+    projectId: string,
+    logIds: string[]
+): Promise<{ deletedCount: number }> {
+    const collection = getLogsCollection();
+    let deletedCount = 0;
+
+    // Fetch and verify logs belong to the project, then delete in batches
+    const batchSize = 500;
+    for (let i = 0; i < logIds.length; i += batchSize) {
+        const batch = collection.firestore.batch();
+        const batchIds = logIds.slice(i, i + batchSize);
+
+        for (const logId of batchIds) {
+            // Verify the log exists and belongs to the project
+            const logDoc = await collection.doc(logId).get();
+            if (logDoc.exists) {
+                const logData = logDoc.data();
+                if (logData && logData.projectId === projectId) {
+                    batch.delete(logDoc.ref);
+                    deletedCount++;
+                }
+            }
+        }
+
+        await batch.commit();
+    }
+
+    // Delete from Typesense if enabled
+    if (isTypesenseEnabled() && deletedCount > 0) {
+        try {
+            const typesenseClient = getTypesenseClient();
+
+            // Search for documents with matching firestoreIds and delete them
+            for (const logId of logIds) {
+                try {
+                    // Search for the Typesense document by firestoreId
+                    const searchResults = await typesenseClient
+                        .collections('logs')
+                        .documents()
+                        .search({
+                            q: '*',
+                            filter_by: `projectId:${projectId} && firestoreId:${logId}`,
+                            per_page: 1,
+                        });
+
+                    const hits = searchResults.hits || [];
+                    if (hits.length > 0) {
+                        const typesenseDocId = (hits[0].document as any).id;
+                        if (typesenseDocId) {
+                            await typesenseClient
+                                .collections('logs')
+                                .documents(typesenseDocId)
+                                .delete();
+                        }
+                    }
+                } catch (error: any) {
+                    // Ignore 404 errors (document already deleted or not found)
+                    if (error?.httpStatus !== 404) {
+                        console.error(`Error deleting Typesense document for log ${logId}:`, error);
+                    }
+                }
+            }
+
+            console.log(`Deleted ${deletedCount} documents from Typesense`);
+        } catch (error) {
+            console.error('Error deleting logs from Typesense:', error);
+            // Don't throw - Firestore deletion succeeded, Typesense is secondary
+        }
+    }
+
+    return { deletedCount };
+}
+
+/**
  * Helper function to parse lookback time and time range from query parameters
  * @param lookbackTime - Optional lookback time string
  * @param timeRange - Optional time range string
