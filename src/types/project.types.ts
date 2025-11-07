@@ -77,6 +77,7 @@ export interface Project {
     name: string;
     description?: string;
     projectId: string; // User-friendly slug identifier
+    ownerId: string; // Firestore document ID of the project owner
     users: ProjectUser[];
     apiKeys?: ProjectApiKey[];
     alarms?: ProjectAlarm[];

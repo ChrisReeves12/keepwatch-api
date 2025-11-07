@@ -181,7 +181,7 @@ export const getCurrentUserProjects = async (req: Request, res: Response): Promi
  * /api/v1/projects/{projectId}:
  *   get:
  *     summary: Get a project by ID
- *     description: Get a specific project by projectId. User must have access to the project.
+ *     description: Get a specific project by projectId. User must have access to the project. Returns project with owner information (ownerId, ownerName, ownerEmail).
  *     tags: [Projects]
  *     security:
  *       - bearerAuth: []
@@ -194,14 +194,28 @@ export const getCurrentUserProjects = async (req: Request, res: Response): Promi
  *         description: Project slug identifier
  *     responses:
  *       200:
- *         description: Project retrieved successfully
+ *         description: Project retrieved successfully with owner information
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
  *                 project:
- *                   $ref: '#/components/schemas/Project'
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/Project'
+ *                     - type: object
+ *                       properties:
+ *                         ownerId:
+ *                           type: string
+ *                           description: Firestore document ID of the project owner
+ *                         ownerName:
+ *                           type: string
+ *                           nullable: true
+ *                           description: Name of the project owner
+ *                         ownerEmail:
+ *                           type: string
+ *                           nullable: true
+ *                           description: Email of the project owner
  *       401:
  *         description: Authentication required
  *         content:
@@ -275,9 +289,15 @@ export const getProjectByProjectId = async (req: Request, res: Response): Promis
             })
         );
 
+        // Get owner information
+        const ownerData = await UsersService.findUserById(project.ownerId);
+
         const enrichedProject = {
             ...project,
             users: enrichedUsers,
+            ownerId: project.ownerId,
+            ownerName: ownerData?.name || null,
+            ownerEmail: ownerData?.email || null,
         };
 
         res.json({
@@ -1273,7 +1293,7 @@ export const updateProjectApiKey = async (req: Request, res: Response): Promise<
  * /api/v1/projects/{projectId}/users/{userId}:
  *   delete:
  *     summary: Remove a user from a project
- *     description: Remove a user from a project. Current user must be admin on the project. Admins cannot remove themselves.
+ *     description: Remove a user from a project. Current user must be admin on the project. Admins cannot remove themselves. The project owner cannot be removed.
  *     tags: [Projects]
  *     security:
  *       - bearerAuth: []
@@ -1304,7 +1324,7 @@ export const updateProjectApiKey = async (req: Request, res: Response): Promise<
  *                 project:
  *                   $ref: '#/components/schemas/Project'
  *       400:
- *         description: Admins cannot remove themselves
+ *         description: Admins cannot remove themselves, or the project owner cannot be removed
  *         content:
  *           application/json:
  *             schema:
@@ -1376,6 +1396,14 @@ export const removeUserFromProject = async (req: Request, res: Response): Promis
         if (currentUser._id === userId) {
             res.status(400).json({
                 error: 'Admins cannot remove themselves from the project',
+            });
+            return;
+        }
+
+        // Prevent removal of the project owner
+        if (project.ownerId === userId) {
+            res.status(400).json({
+                error: 'The project owner cannot be removed from the project',
             });
             return;
         }

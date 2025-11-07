@@ -613,6 +613,7 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
         name: projectData.name,
         description: projectData.description,
         projectId,
+        ownerId: creatorUserId,
         users: [creatorUser],
         createdAt: now,
         updatedAt: now,
