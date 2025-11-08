@@ -2,6 +2,7 @@ import { getFirestore } from '../database/firestore.connection';
 import { User, CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { hashPassword } from './crypt.service';
 import { slugify } from '../utils/slugify.util';
+import { getCache, setCache } from './redis.service';
 
 const COLLECTION_NAME = 'users';
 
@@ -137,6 +138,44 @@ export async function findUserById(id: string): Promise<User | null> {
     const collection = getUsersCollection();
     const doc = await collection.doc(id).get();
     return toUser(doc);
+}
+
+/**
+ * Get user's createdAt date from cache or database
+ * Cache TTL is 60 days since createdAt never changes
+ * @param userId - Firestore document ID string
+ * @returns User's createdAt date or null if user not found
+ */
+export async function getUserCreatedAt(userId: string): Promise<Date | null> {
+    const cacheKey = `user:${userId}:createdAt`;
+
+    try {
+        const cachedCreatedAt = await getCache<string>(cacheKey);
+        if (cachedCreatedAt) {
+            console.log(`User createdAt cache hit for: ${userId}`);
+            return new Date(cachedCreatedAt);
+        }
+    } catch (error) {
+        console.error('❌ Failed to get user createdAt from cache:', error);
+    }
+
+    console.log(`User createdAt cache miss for: ${userId}, fetching from database`);
+
+    const user = await findUserById(userId);
+    
+    if (user && user.createdAt) {
+        try {
+            console.log(`Caching user createdAt for: ${userId}`);
+            // Cache for 60 days since createdAt never changes
+            await setCache(cacheKey, user.createdAt.toISOString(), 60 * 24 * 60 * 60); // 60 days in seconds
+            console.log(`Successfully cached user createdAt for: ${userId}`);
+        } catch (error) {
+            console.error('❌ Failed to cache user createdAt:', error);
+        }
+        return user.createdAt;
+    }
+
+    return null;
 }
 
 /**

@@ -4,6 +4,7 @@ import usersRoutes from './users.routes';
 import authRoutes from './auth.routes';
 import projectsRoutes from './projects.routes';
 import logsRoutes from './logs.routes';
+import usageRoutes from './usage.routes';
 
 const router = Router();
 
@@ -12,6 +13,7 @@ router.use('/auth', authRoutes);
 router.use('/users', usersRoutes);
 router.use('/projects', projectsRoutes);
 router.use('/logs', logsRoutes);
+router.use('/usage', usageRoutes);
 
 export default router;
 

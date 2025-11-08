@@ -3,8 +3,11 @@ import * as LogsService from '../services/logs.service';
 import * as ProjectsService from '../services/projects.service';
 import * as UsersService from '../services/users.service';
 import * as PubSubService from '../services/pubsub.service';
+import * as UsageService from '../services/usage.service';
+import { sendEmail } from '../services/mail.service';
 import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
-import { LOG_ALARM_TOPIC, LOG_INGESTION_TOPIC } from '../constants';
+import { LOG_ALARM_TOPIC, LOG_INGESTION_TOPIC, MONTHLY_LOG_LIMIT } from '../constants';
+import moment from 'moment';
 
 // Ensure the topics exist at startup
 PubSubService.ensureTopicExists(LOG_INGESTION_TOPIC).catch(console.error);
@@ -73,6 +76,32 @@ PubSubService.ensureTopicExists(LOG_ALARM_TOPIC).catch(console.error);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
+ *       429:
+ *         description: Too Many Requests - Monthly log limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Monthly log limit exceeded
+ *                 limit:
+ *                   type: number
+ *                   description: The monthly log limit
+ *                   example: 10000
+ *                 current:
+ *                   type: number
+ *                   description: Current usage count
+ *                   example: 10000
+ *                 periodStart:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Start of the current billing period
+ *                 periodEnd:
+ *                   type: string
+ *                   format: date-time
+ *                   description: End of the current billing period
  *       500:
  *         description: Server error
  *         content:
@@ -87,7 +116,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             res.status(401).json({
                 error: 'API key authentication required',
             });
-            
+
             return;
         }
 
@@ -130,6 +159,90 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
         if (logData.projectId !== project.projectId) {
             res.status(403).json({
                 error: 'Forbidden: API key project does not match the requested project',
+            });
+
+            return;
+        }
+
+        // Check usage quota before processing
+        const ownerId = project.ownerId;
+        if (!ownerId) {
+            res.status(500).json({
+                error: 'Project owner information is missing',
+            });
+            return;
+        }
+
+        const ownerCreatedAt = await UsersService.getUserCreatedAt(ownerId);
+        if (!ownerCreatedAt) {
+            res.status(500).json({
+                error: 'Owner information not found',
+            });
+            return;
+        }
+
+        // Check and increment usage
+        const usageResult = await UsageService.checkAndIncrementOwnerUsage(
+            ownerId,
+            ownerCreatedAt,
+            1,
+            MONTHLY_LOG_LIMIT
+        );
+
+        if (!usageResult.allowed) {
+            // Usage limit exceeded
+            const period = UsageService.getBillingPeriod(ownerCreatedAt);
+            const periodKey = period.periodKey;
+
+            // Check if we've already sent an email for this period
+            const emailSent = await UsageService.hasSentLimitEmail(ownerId, periodKey);
+
+            if (!emailSent) {
+                // Load full owner info only when we need to send email
+                const owner = await UsersService.findUserById(ownerId);
+
+                if (owner && owner.email) {
+                    // Send email notification to owner
+                    const periodStartFormatted = moment.utc(period.start).format('MMMM D, YYYY');
+                    const periodEndFormatted = moment.utc(period.end).format('MMMM D, YYYY');
+
+                    const emailContent = `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <div style="background-color: rgb(14, 128, 134); color: white; padding: 20px; border-radius: 5px 5px 0 0;">
+                                <h2 style="margin: 0;">Monthly Log Limit Reached</h2>
+                            </div>
+                            <div style="background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
+                                <p>Hello ${owner.name},</p>
+                                <p>Your KeepWatch account has reached its monthly log limit of <strong>${MONTHLY_LOG_LIMIT.toLocaleString()}</strong> logs.</p>
+                                <p><strong>Current Usage:</strong> ${usageResult.current.toLocaleString()} logs</p>
+                                <p><strong>Billing Period:</strong> ${periodStartFormatted} - ${periodEndFormatted}</p>
+                                <p>New log requests will be rejected until your next billing period begins. If you need higher limits, please consider upgrading your plan.</p>
+                                <p>If you have any questions, please contact our support team.</p>
+                                <p>Best regards,<br>The KeepWatch Team</p>
+                            </div>
+                        </div>
+                    `;
+
+                    try {
+                        await sendEmail(
+                            [owner.email],
+                            'Monthly Log Limit Reached - KeepWatch',
+                            emailContent
+                        );
+                        await UsageService.markLimitEmailSent(ownerId, periodKey);
+                    } catch (emailError) {
+                        console.error('Failed to send limit notification email:', emailError);
+                        // Continue even if email fails
+                    }
+                }
+            }
+
+            res.status(429).json({
+                error: 'Monthly log limit exceeded',
+                limit: MONTHLY_LOG_LIMIT,
+                current: usageResult.current,
+                periodStart: period.start.toISOString(),
+                periodEnd: period.end.toISOString(),
             });
 
             return;
@@ -1071,7 +1184,7 @@ export const purgeProjectLogs = async (req: Request, res: Response): Promise<voi
 
         // Check if logIds are provided in the request body
         const { logIds } = req.body || {};
-        
+
         if (logIds && Array.isArray(logIds)) {
             // Delete by log IDs
             if (logIds.length === 0) {
