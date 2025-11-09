@@ -1,10 +1,14 @@
-import { getFirestore } from '../database/firestore.connection';
+import { getFirestore, toDate } from '../database/firestore.connection';
 import { User, CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { hashPassword } from './crypt.service';
 import { slugify } from '../utils/slugify.util';
 import { getCache, setCache } from './redis.service';
+import { removeUserFromAllProjects, deleteProjectsByOwnerId } from './projects.service';
+import moment from 'moment';
 
 const COLLECTION_NAME = 'users';
+const DELETION_CODES_COLLECTION = 'account_deletion_codes';
+const CODE_EXPIRY_MINUTES = 15;
 
 /**
  * Get the users collection
@@ -162,7 +166,7 @@ export async function getUserCreatedAt(userId: string): Promise<Date | null> {
     console.log(`User createdAt cache miss for: ${userId}, fetching from database`);
 
     const user = await findUserById(userId);
-    
+
     if (user && user.createdAt) {
         try {
             console.log(`Caching user createdAt for: ${userId}`);
@@ -232,6 +236,10 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
 
 /**
  * Delete a user by userId
+ * This performs a cascade delete:
+ * 1. Removes user from all projects they are a member of
+ * 2. Deletes all projects owned by the user (and their logs)
+ * 3. Deletes the user account
  * @param userId - The unique userId identifier
  * @returns true if user was deleted, false otherwise
  */
@@ -244,11 +252,13 @@ export async function deleteUser(userId: string): Promise<boolean> {
         return false;
     }
 
-    // Remove user from all projects before deleting
-    const { removeUserFromAllProjects } = await import('./projects.service');
+    // Step 1: Remove user from all projects they are a member of (but don't own)
     await removeUserFromAllProjects(user._id);
 
-    // Delete the user
+    // Step 2: Delete all projects owned by this user (cascade deletes logs too)
+    await deleteProjectsByOwnerId(user._id);
+
+    // Step 3: Delete the user
     const snapshot = await collection.where('userId', '==', userId).limit(1).get();
 
     if (snapshot.empty) {
@@ -278,3 +288,124 @@ export async function emailExists(email: string): Promise<boolean> {
     const user = await findUserByEmail(email);
     return user !== null;
 }
+
+// ============================================================================
+// Account Deletion Verification Functions
+// ============================================================================
+
+interface AccountDeletionCode {
+    email: string;
+    userId: string;
+    code: string;
+    expiresAt: Date;
+    createdAt: Date;
+    used: boolean;
+}
+
+/**
+ * Get the account deletion codes collection
+ */
+function getDeletionCodesCollection() {
+    const db = getFirestore();
+    if (!db) {
+        throw new Error('Firestore not connected');
+    }
+    return db.collection(DELETION_CODES_COLLECTION);
+}
+
+/**
+ * Generate a random 6-digit code
+ * @returns 6-digit code as string
+ */
+export function generateDeletionCode(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/**
+ * Store an account deletion code for a user
+ * @param email - User's email address
+ * @param userId - User's userId
+ * @param code - The 6-digit deletion code
+ * @returns Promise resolving when code is stored
+ */
+export async function storeDeletionCode(email: string, userId: string, code: string): Promise<void> {
+    const collection = getDeletionCodesCollection();
+
+    // Invalidate any existing codes for this user
+    const existingSnapshot = await collection
+        .where('userId', '==', userId)
+        .where('used', '==', false)
+        .get();
+
+    const batch = getFirestore()!.batch();
+    existingSnapshot.docs.forEach(doc => {
+        batch.update(doc.ref, { used: true });
+    });
+
+    // Create new deletion code
+    const expiresAt = moment().add(CODE_EXPIRY_MINUTES, 'minutes').toDate();
+    const deletionCode: Omit<AccountDeletionCode, '_id'> = {
+        email,
+        userId,
+        code,
+        expiresAt,
+        createdAt: new Date(),
+        used: false,
+    };
+
+    const docRef = collection.doc();
+    batch.set(docRef, deletionCode);
+
+    await batch.commit();
+}
+
+/**
+ * Validate an account deletion code
+ * @param userId - User's userId
+ * @param code - The 6-digit deletion code to validate
+ * @returns true if code is valid and not expired, false otherwise
+ */
+export async function validateDeletionCode(userId: string, code: string): Promise<boolean> {
+    const collection = getDeletionCodesCollection();
+
+    // Query for the specific code
+    const snapshot = await collection
+        .where('userId', '==', userId)
+        .where('code', '==', code)
+        .where('used', '==', false)
+        .get();
+
+    if (snapshot.empty) {
+        return false;
+    }
+
+    // Get the most recent code if multiple exist (shouldn't happen, but just in case)
+    const docs = snapshot.docs.sort((a, b) => {
+        const aData = a.data();
+        const bData = b.data();
+        const aCreatedAt = toDate(aData.createdAt);
+        const bCreatedAt = toDate(bData.createdAt);
+        return bCreatedAt.getTime() - aCreatedAt.getTime();
+    });
+
+    const doc = docs[0];
+    const rawData = doc.data();
+
+    // Convert Firestore Timestamps to Date objects
+    const expiresAt = toDate(rawData.expiresAt);
+
+    // Check if code has expired
+    const now = moment();
+    const expiresAtMoment = moment(expiresAt);
+
+    if (now.isAfter(expiresAtMoment)) {
+        // Mark as used since it's expired
+        await doc.ref.update({ used: true });
+        return false;
+    }
+
+    // Mark code as used
+    await doc.ref.update({ used: true });
+    return true;
+}
+

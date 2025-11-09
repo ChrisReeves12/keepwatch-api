@@ -797,9 +797,49 @@ export async function deleteProject(projectId: string): Promise<boolean> {
     // Invalidate cache after deletion
     await deleteCache(`project:${projectId}`);
 
-    console.log(`✅ Deleted project: ${projectId}`);
+    console.log(`Deleted project: ${projectId} (and ${deletedCount} logs)`);
 
     return true;
+}
+
+/**
+ * Delete all projects owned by a specific user
+ * Also deletes all logs associated with those projects (cascading delete)
+ * Called when a user is deleted
+ * @param ownerId - Document ID of the owner whose projects should be deleted
+ * @returns Object with number of projects and logs deleted
+ */
+export async function deleteProjectsByOwnerId(ownerId: string): Promise<{ deletedProjects: number; deletedLogs: number }> {
+    const collection = getProjectsCollection();
+
+    // Find all projects owned by this user
+    const snapshot = await collection.where('ownerId', '==', ownerId).get();
+
+    let deletedProjects = 0;
+    let deletedLogs = 0;
+
+    // Delete each project (which will cascade delete logs)
+    for (const doc of snapshot.docs) {
+        const project = toProject(doc);
+        if (project && project.projectId) {
+            // Delete all logs for this project
+            const { deletedCount } = await deleteLogsByProjectId(project.projectId);
+            deletedLogs += deletedCount;
+
+            // Delete the project
+            await doc.ref.delete();
+
+            // Invalidate cache
+            await deleteCache(`project:${project.projectId}`);
+
+            deletedProjects++;
+            console.log(`Deleted project: ${project.projectId} (and ${deletedCount} logs)`);
+        }
+    }
+
+    console.log(`Deleted ${deletedProjects} projects and ${deletedLogs} logs for owner: ${ownerId}`);
+
+    return { deletedProjects, deletedLogs };
 }
 
 /**

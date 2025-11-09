@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as UsersService from '../services/users.service';
 import { CreateUserInput, UpdateUserInput } from '../types/user.types';
+import { sendEmail } from '../services/mail.service';
 
 /**
  * @swagger
@@ -268,13 +269,134 @@ export const updateCurrentUser = async (req: Request, res: Response): Promise<vo
 
 /**
  * @swagger
- * /api/v1/users/me:
- *   delete:
- *     summary: Delete current user
- *     description: Delete the currently authenticated user's account
+ * /api/v1/users/me/delete/request:
+ *   post:
+ *     summary: Request account deletion verification code
+ *     description: Generates a 6-digit verification code and sends it to the user's email. The code expires in 15 minutes and must be used in the DELETE /api/v1/users/me endpoint to confirm account deletion.
  *     tags: [Users]
  *     security:
  *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Verification code sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Account deletion verification code has been sent to your email.
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const requestAccountDeletion = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const userId = req.user.userId;
+
+        // Get user details
+        const user = await UsersService.findUserByUserId(userId);
+        if (!user) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Generate and store deletion code
+        const code = UsersService.generateDeletionCode();
+        await UsersService.storeDeletionCode(user.email, userId, code);
+
+        // Send email with deletion code
+        const emailContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">Account Deletion Request</h2>
+                <p>You requested to delete your KeepWatch account. Use the following code to confirm the deletion:</p>
+                <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px;">
+                    <h1 style="color: #dc3545; font-size: 32px; letter-spacing: 5px; margin: 0;">${code}</h1>
+                </div>
+                <p><strong style="color: #dc3545;">Warning:</strong> This action is permanent and will:</p>
+                <ul style="color: #666;">
+                    <li>Remove you from all projects you are a member of</li>
+                    <li>Delete all projects you own</li>
+                    <li>Delete all logs associated with your owned projects</li>
+                    <li>Delete your account permanently</li>
+                </ul>
+                <p>This code will expire in 15 minutes.</p>
+                <p>If you didn't request this, please ignore this email and your account will remain safe.</p>
+            </div>
+        `;
+
+        await sendEmail(
+            [user.email],
+            'Account Deletion Verification Code - KeepWatch',
+            emailContent
+        );
+
+        res.json({
+            message: 'Account deletion verification code has been sent to your email.',
+        });
+    } catch (error: any) {
+        console.error('Error requesting account deletion:', error);
+        res.status(500).json({
+            error: 'Failed to process account deletion request',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/users/me:
+ *   delete:
+ *     summary: Delete current user
+ *     description: |
+ *       Delete the currently authenticated user's account. Requires a 6-digit verification code sent via POST /api/v1/users/me/delete/request.
+ *       This performs a cascade delete:
+ *       1. Removes user from all projects they are a member of
+ *       2. Deletes all projects owned by the user
+ *       3. Deletes all logs associated with those owned projects
+ *       4. Deletes the user account
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: 6-digit verification code from email
+ *                 example: '123456'
  *     responses:
  *       200:
  *         description: User deleted successfully
@@ -286,8 +408,14 @@ export const updateCurrentUser = async (req: Request, res: Response): Promise<vo
  *                 message:
  *                   type: string
  *                   example: User deleted successfully
+ *       400:
+ *         description: Missing or invalid verification code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       401:
- *         description: Authentication required
+ *         description: Authentication required or invalid verification code
  *         content:
  *           application/json:
  *             schema:
@@ -315,6 +443,35 @@ export const deleteCurrentUser = async (req: Request, res: Response): Promise<vo
         }
 
         const userId = req.user.userId;
+        const { code } = req.body;
+
+        // Validate required fields
+        if (!code) {
+            res.status(400).json({
+                error: 'Missing required field: code',
+            });
+            return;
+        }
+
+        // Validate code format (6 digits)
+        if (!/^\d{6}$/.test(code)) {
+            res.status(400).json({
+                error: 'Invalid code format. Code must be 6 digits.',
+            });
+            return;
+        }
+
+        // Validate the deletion code
+        const isValidCode = await UsersService.validateDeletionCode(userId, code);
+
+        if (!isValidCode) {
+            res.status(401).json({
+                error: 'Invalid or expired verification code',
+            });
+            return;
+        }
+
+        // Proceed with deletion
         const deleted = await UsersService.deleteUser(userId);
 
         if (!deleted) {
