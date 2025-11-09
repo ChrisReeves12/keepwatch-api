@@ -8,6 +8,8 @@ import { createUserIndexes } from './services/users.service';
 import { createProjectIndexes } from './services/projects.service';
 import { createLogIndexes } from './services/logs.service';
 import { createLogsTypesenseCollection } from './services/typesense.service';
+import { initializeSubscriptionCollections } from './services/subscription.service';
+import { initializeSystemAdminsCollection } from './services/system-admins.service';
 import { connectToRedis, closeRedisConnection, isCachingEnabled } from './services/redis.service';
 import { swaggerSpec } from './config/swagger.config';
 
@@ -58,6 +60,8 @@ async function startServer() {
         await createUserIndexes();
         await createProjectIndexes();
         await createLogIndexes();
+        await initializeSubscriptionCollections();
+        await initializeSystemAdminsCollection();
 
         // Initialize Typesense collections
         await createLogsTypesenseCollection();
