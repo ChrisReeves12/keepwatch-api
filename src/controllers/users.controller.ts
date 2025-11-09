@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import * as UsersService from '../services/users.service';
 import { CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { sendEmail } from '../services/mail.service';
+import { generateEmailVerificationCode, storeEmailVerificationCode } from '../services/email-verification.service';
 
 /**
  * @swagger
@@ -72,6 +73,31 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
 
         // Remove password from response
         const { password, ...userResponse } = user;
+
+        try {
+            const code = generateEmailVerificationCode();
+            await storeEmailVerificationCode(user.userId, user.email, code, user._id);
+
+            const emailContent = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #333;">Welcome to KeepWatch!</h2>
+                    <p>Thanks for signing up. Use the verification code below to confirm your email address:</p>
+                    <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px;">
+                        <h1 style="color: #28a745; font-size: 32px; letter-spacing: 5px; margin: 0;">${code}</h1>
+                    </div>
+                    <p>This code will expire in 15 minutes.</p>
+                    <p>If you didn't create this account, you can safely ignore this email.</p>
+                </div>
+            `;
+
+            await sendEmail(
+                [user.email],
+                'Verify Your Email - KeepWatch',
+                emailContent
+            );
+        } catch (otpError) {
+            console.error('Error sending verification email:', otpError);
+        }
 
         res.status(201).json({
             message: 'User created successfully',
@@ -146,8 +172,13 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
         // Remove password from response
         const { password, ...userResponse } = user;
 
+        const userPayload = {
+            ...userResponse,
+            emailVerifiedAt: user.emailVerifiedAt ?? null,
+        };
+
         res.json({
-            user: userResponse,
+            user: userPayload,
         });
     } catch (error: any) {
         console.error('Error fetching user:', error);

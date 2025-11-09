@@ -8,6 +8,7 @@ export interface User {
     password: string;
     userId: string; // Unique machine-readable identifier (slug)
     company?: string;
+    emailVerifiedAt?: Date | null;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -30,4 +31,5 @@ export interface UpdateUserInput {
     email?: string;
     password?: string;
     company?: string;
+    emailVerifiedAt?: Date | null;
 }

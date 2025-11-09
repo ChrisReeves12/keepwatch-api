@@ -28,9 +28,11 @@ function toUser(doc: FirebaseFirestore.DocumentSnapshot): User | null {
     if (!doc.exists) return null;
 
     const data = doc.data()!;
+    const emailVerifiedAt = data.emailVerifiedAt ? toDate(data.emailVerifiedAt) : null;
     return {
         ...data,
         _id: doc.id,
+        emailVerifiedAt,
         createdAt: data.createdAt?.toDate() || new Date(),
         updatedAt: data.updatedAt?.toDate() || new Date(),
     } as User;
@@ -81,12 +83,13 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
     const userId = await generateUniqueUserId(userData.name);
     const hashedPassword = await hashPassword(userData.password);
 
-    const now = new Date();
+    const now = moment().toDate();
     const user: Omit<User, '_id'> = {
         name: userData.name,
         email: userData.email,
         password: hashedPassword,
         userId,
+        emailVerifiedAt: null,
         createdAt: now,
         updatedAt: now,
     };
@@ -221,7 +224,7 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
 
     const updatedData: any = {
         ...updateData,
-        updatedAt: new Date(),
+        updatedAt: moment().toDate(),
     };
 
     if (updateData.password) {
@@ -229,6 +232,31 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
     }
 
     await docRef.update(updatedData);
+
+    const updatedDoc = await docRef.get();
+    return toUser(updatedDoc);
+}
+
+/**
+ * Mark a user's email as verified by userId
+ * @param userId - The unique userId identifier
+ * @returns Updated user document or null if not found
+ */
+export async function markEmailVerified(userId: string): Promise<User | null> {
+    const collection = getUsersCollection();
+    const snapshot = await collection.where('userId', '==', userId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const now = moment().toDate();
+
+    await docRef.update({
+        emailVerifiedAt: now,
+        updatedAt: now,
+    });
 
     const updatedDoc = await docRef.get();
     return toUser(updatedDoc);

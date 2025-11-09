@@ -85,6 +85,13 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+        if (!creatorUser.emailVerifiedAt) {
+            res.status(403).json({
+                error: 'Email verification required to create projects',
+            });
+            return;
+        }
+
         const project = await ProjectsService.createProject(projectData, creatorUser._id);
 
         res.status(201).json({
@@ -397,6 +404,13 @@ export const updateProject = async (req: Request, res: Response): Promise<void> 
         if (!user || !user._id) {
             res.status(404).json({
                 error: 'User not found',
+            });
+            return;
+        }
+
+        if (!user.emailVerifiedAt) {
+            res.status(403).json({
+                error: 'Email verification required to update projects',
             });
             return;
         }
