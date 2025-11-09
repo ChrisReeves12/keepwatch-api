@@ -90,6 +90,7 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
         password: hashedPassword,
         userId,
         emailVerifiedAt: null,
+        is2FARequired: userData.is2FARequired ?? false,
         createdAt: now,
         updatedAt: now,
     };

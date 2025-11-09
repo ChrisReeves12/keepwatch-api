@@ -5,6 +5,7 @@ import { createToken } from '../services/jwt.service';
 import { generateRecoveryCode, storeRecoveryCode, validateRecoveryCode } from '../services/password-recovery.service';
 import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode, validateEmailVerificationCode } from '../services/email-verification.service';
+import { generateTwoFactorCode, storeTwoFactorCode, validateTwoFactorCode } from '../services/two-factor.service';
 
 /**
  * @swagger
@@ -98,18 +99,58 @@ export const authenticate = async (req: Request, res: Response): Promise<void> =
             return;
         }
 
-        // Create JWT token
-        const token = createToken({
-            userId: user.userId,
-            email: user.email,
-        });
-
         // Remove password from response
         const { password: _, ...userResponse } = user;
         const userPayload = {
             ...userResponse,
             emailVerifiedAt: user.emailVerifiedAt ?? null,
+            is2FARequired: user.is2FARequired ?? false,
         };
+
+        if (user.is2FARequired) {
+            try {
+                const code = generateTwoFactorCode();
+                await storeTwoFactorCode(user.email, user.userId, code);
+
+                const emailContent = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #333;">Two-Factor Authentication Code</h2>
+                        <p>Use the verification code below to complete your sign-in:</p>
+                        <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px;">
+                            <h1 style="color: #007bff; font-size: 32px; letter-spacing: 5px; margin: 0;">${code}</h1>
+                        </div>
+                        <p>This code will expire in 15 minutes.</p>
+                        <p>If you didn't attempt to sign in, you can safely ignore this email.</p>
+                    </div>
+                `;
+
+                await sendEmail(
+                    [user.email],
+                    'Two-Factor Authentication Code - KeepWatch',
+                    emailContent
+                );
+            } catch (error) {
+                console.error('Error sending two-factor authentication email:', error);
+                res.status(500).json({
+                    error: 'Failed to send two-factor authentication code',
+                });
+                return;
+            }
+
+            res.json({
+                message: 'Two-factor authentication required',
+                token: '',
+                is2FARequired: true,
+                user: userPayload,
+            });
+            return;
+        }
+
+        // Create JWT token
+        const token = createToken({
+            userId: user.userId,
+            email: user.email,
+        });
 
         res.json({
             message: 'Authentication successful',
@@ -558,6 +599,134 @@ export const resendVerificationEmail = async (req: Request, res: Response): Prom
         console.error('Error resending verification email:', error);
         res.status(500).json({
             error: 'Failed to resend verification email',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/verify-2fa:
+ *   post:
+ *     summary: Complete two-factor authentication
+ *     description: Validates a 6-digit two-factor authentication code and returns a JWT token upon success.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: 6-digit two-factor authentication code
+ *                 example: '123456'
+ *     responses:
+ *       200:
+ *         description: Two-factor authentication successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Authentication successful
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Missing required fields or invalid code format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Invalid or expired two-factor authentication code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const verifyTwoFactor = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { email, code } = req.body;
+
+        if (!email || !code) {
+            res.status(400).json({
+                error: 'Missing required fields: email, code',
+            });
+            return;
+        }
+
+        if (!/^\d{6}$/.test(code)) {
+            res.status(400).json({
+                error: 'Invalid code format. Code must be 6 digits.',
+            });
+            return;
+        }
+
+        const user = await UsersService.findUserByEmail(email);
+
+        if (!user) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const validationResult = await validateTwoFactorCode(email, code);
+
+        if (!validationResult || validationResult.userId !== user.userId) {
+            res.status(401).json({
+                error: 'Invalid or expired two-factor authentication code',
+            });
+            return;
+        }
+
+        const token = createToken({
+            userId: user.userId,
+            email: user.email,
+        });
+
+        const { password, ...userResponse } = user;
+        const userPayload = {
+            ...userResponse,
+            emailVerifiedAt: user.emailVerifiedAt ?? null,
+            is2FARequired: user.is2FARequired ?? false,
+        };
+
+        res.json({
+            message: 'Authentication successful',
+            token,
+            user: userPayload,
+        });
+    } catch (error: any) {
+        console.error('Error verifying two-factor authentication code:', error);
+        res.status(500).json({
+            error: 'Failed to verify two-factor authentication code',
             details: error.message,
         });
     }

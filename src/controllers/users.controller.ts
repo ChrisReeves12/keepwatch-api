@@ -74,6 +74,12 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         // Remove password from response
         const { password, ...userResponse } = user;
 
+        const createdUserPayload = {
+            ...userResponse,
+            emailVerifiedAt: user.emailVerifiedAt ?? null,
+            is2FARequired: user.is2FARequired ?? false,
+        };
+
         try {
             const code = generateEmailVerificationCode();
             await storeEmailVerificationCode(user.userId, user.email, code, user._id);
@@ -101,7 +107,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
 
         res.status(201).json({
             message: 'User created successfully',
-            user: userResponse,
+            user: createdUserPayload,
         });
     } catch (error: any) {
         console.error('Error creating user:', error);
@@ -175,6 +181,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
         const userPayload = {
             ...userResponse,
             emailVerifiedAt: user.emailVerifiedAt ?? null,
+            is2FARequired: user.is2FARequired ?? false,
         };
 
         res.json({
@@ -254,6 +261,13 @@ export const updateCurrentUser = async (req: Request, res: Response): Promise<vo
         const userId = req.user.userId;
         const updateData: UpdateUserInput = req.body;
 
+        if (typeof updateData.is2FARequired !== 'undefined' && typeof updateData.is2FARequired !== 'boolean') {
+            res.status(400).json({
+                error: 'Invalid value for is2FARequired. Expected a boolean.',
+            });
+            return;
+        }
+
         // Check if user exists
         const existingUser = await UsersService.findUserByUserId(userId);
         if (!existingUser) {
@@ -287,7 +301,11 @@ export const updateCurrentUser = async (req: Request, res: Response): Promise<vo
 
         res.json({
             message: 'User updated successfully',
-            user: userResponse,
+            user: {
+                ...userResponse,
+                emailVerifiedAt: updatedUser.emailVerifiedAt ?? null,
+                is2FARequired: updatedUser.is2FARequired ?? false,
+            },
         });
     } catch (error: any) {
         console.error('Error updating user:', error);
