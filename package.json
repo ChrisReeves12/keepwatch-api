@@ -23,7 +23,8 @@
     "console:drop-collection": "tsx src/console/drop-firestore-collection.ts",
     "console:drop-typesense": "tsx src/console/drop-typesense-collection.ts",
     "console:typesense-schema": "tsx src/console/get-typesense-schema.ts",
-    "console:search-typesense": "tsx src/console/search-typescript-collection.ts"
+    "console:search-typesense": "tsx src/console/search-typescript-collection.ts",
+    "console:create-system-admin": "tsx src/console/create-system-admin.ts"
   },
   "keywords": [],
   "author": "",

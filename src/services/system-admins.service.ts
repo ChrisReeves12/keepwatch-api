@@ -10,7 +10,7 @@ import {
 
 const COLLECTION_NAME = 'systemAdmins';
 
-function getSystemAdminsCollection() {
+export function getSystemAdminsCollection() {
     const db = getFirestore();
     if (!db) {
         throw new Error('Firestore not connected');
@@ -34,7 +34,7 @@ function toSystemAdmin(doc: FirebaseFirestore.DocumentSnapshot): SystemAdmin | n
     };
 }
 
-async function findAdminDocByEmail(email: string) {
+export async function findAdminDocByEmail(email: string) {
     const collection = getSystemAdminsCollection();
     const snapshot = await collection.where('email', '==', email).limit(1).get();
 
