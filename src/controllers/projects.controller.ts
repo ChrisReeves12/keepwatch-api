@@ -1778,6 +1778,118 @@ export const verifyProjectInvite = async (req: Request, res: Response): Promise<
 
 /**
  * @swagger
+ * /api/v1/projects/invite/{inviteId}/project-details:
+ *   get:
+ *     summary: Get project details by invite
+ *     description: Get project details (name, description, owner info) using an invite ID and token. No authentication required.
+ *     tags: [Projects]
+ *     parameters:
+ *       - in: path
+ *         name: inviteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The unique identifier of the invite
+ *       - in: query
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The invite verification token
+ *     responses:
+ *       200:
+ *         description: Project details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 name:
+ *                   type: string
+ *                   example: My Project
+ *                 description:
+ *                   type: string
+ *                   nullable: true
+ *                   example: Project description
+ *                 ownerName:
+ *                   type: string
+ *                   nullable: true
+ *                   example: John Doe
+ *                 ownerEmail:
+ *                   type: string
+ *                   nullable: true
+ *                   example: john@example.com
+ *       403:
+ *         description: Invalid or expired invite
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getProjectByInviteDetails = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { inviteId } = req.params;
+        const token = typeof req.query.token === 'string' ? req.query.token : null;
+
+        if (!token) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        // Verify the invite (validates inviteId, token, and expiration)
+        const invite = await ProjectInvitesService.verifyProjectInvite(inviteId, token);
+
+        if (!invite) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        // Get the project using the projectId from the invite
+        const project = await ProjectsService.findProjectByProjectId(invite.projectId);
+
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get owner information
+        const ownerData = await UsersService.findUserById(project.ownerId);
+
+        res.json({
+            name: project.name,
+            description: project.description || null,
+            ownerName: ownerData?.name || null,
+            ownerEmail: ownerData?.email || null,
+        });
+    } catch (error: any) {
+        console.error('Error fetching project details by invite:', error);
+        res.status(500).json({
+            error: 'Failed to fetch project details',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/alarms:
  *   get:
  *     summary: Get all alarms for a project

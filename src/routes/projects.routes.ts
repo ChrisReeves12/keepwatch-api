@@ -25,8 +25,8 @@ router.delete('/:projectId/users/:userId', authenticate, ProjectsController.remo
 router.post('/:projectId/invite/send', authenticate, ProjectsController.sendUserInvite);
 // New public route without projectId
 router.get('/invite/:inviteId', ProjectsController.verifyProjectInvite);
-// Backward-compatible alias (projectId is ignored by controller)
-router.get('/:projectId/invite/:inviteId', ProjectsController.verifyProjectInvite);
+
+router.get('/invite/:inviteId/project-details', ProjectsController.getProjectByInviteDetails);
 
 // Alarm routes
 router.get('/:projectId/alarms', authenticate, ProjectsController.listProjectAlarms);
