@@ -6,7 +6,7 @@ import * as PubSubService from '../services/pubsub.service';
 import * as UsageService from '../services/usage.service';
 import { sendEmail } from '../services/mail.service';
 import { CreateLogInput, QueryLogsRequest } from '../types/log.types';
-import { LOG_ALARM_TOPIC, LOG_INGESTION_TOPIC, MONTHLY_LOG_LIMIT } from '../constants';
+import { LOG_ALARM_TOPIC, LOG_INGESTION_TOPIC } from '../constants';
 import moment from 'moment';
 
 // Ensure the topics exist at startup
@@ -88,7 +88,8 @@ PubSubService.ensureTopicExists(LOG_ALARM_TOPIC).catch(console.error);
  *                   example: Monthly log limit exceeded
  *                 limit:
  *                   type: number
- *                   description: The monthly log limit
+ *                   nullable: true
+ *                   description: The monthly log limit (null when unlimited)
  *                   example: 10000
  *                 current:
  *                   type: number
@@ -188,25 +189,27 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const ownerCreatedAt = await UsersService.getUserCreatedAt(ownerId);
-        if (!ownerCreatedAt) {
+        const ownerUsageMetadata = await UsersService.getUserCreatedAtAndEnrollment(ownerId);
+        if (!ownerUsageMetadata) {
             res.status(500).json({
-                error: 'Owner information not found',
+                error: 'Owner usage metadata not found',
             });
             return;
         }
 
+        const { userCreatedAt, logLimit } = ownerUsageMetadata;
+
         // Check and increment usage
         const usageResult = await UsageService.checkAndIncrementOwnerUsage(
             ownerId,
-            ownerCreatedAt,
+            userCreatedAt,
             1,
-            MONTHLY_LOG_LIMIT
+            logLimit
         );
 
         if (!usageResult.allowed) {
             // Usage limit exceeded
-            const period = UsageService.getBillingPeriod(ownerCreatedAt);
+            const period = UsageService.getBillingPeriod(userCreatedAt);
             const periodKey = period.periodKey;
 
             // Check if we've already sent an email for this period
@@ -220,6 +223,8 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
                     // Send email notification to owner
                     const periodStartFormatted = moment.utc(period.start).format('MMMM D, YYYY');
                     const periodEndFormatted = moment.utc(period.end).format('MMMM D, YYYY');
+                    const limitDisplay = typeof logLimit === 'number' ? logLimit.toLocaleString() : 'Unlimited';
+                    const usageDisplay = usageResult.current.toLocaleString();
 
                     const emailContent = `
                         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -228,8 +233,8 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
                             </div>
                             <div style="background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
                                 <p>Hello ${owner.name},</p>
-                                <p>Your KeepWatch account has reached its monthly log limit of <strong>${MONTHLY_LOG_LIMIT.toLocaleString()}</strong> logs.</p>
-                                <p><strong>Current Usage:</strong> ${usageResult.current.toLocaleString()} logs</p>
+                                <p>Your KeepWatch account has reached its monthly log limit of <strong>${limitDisplay}</strong> logs.</p>
+                                <p><strong>Current Usage:</strong> ${usageDisplay} logs</p>
                                 <p><strong>Billing Period:</strong> ${periodStartFormatted} - ${periodEndFormatted}</p>
                                 <p>New log requests will be rejected until your next billing period begins. If you need higher limits, please consider upgrading your plan.</p>
                                 <p>If you have any questions, please contact our support team.</p>
@@ -254,7 +259,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
 
             res.status(429).json({
                 error: 'Monthly log limit exceeded',
-                limit: MONTHLY_LOG_LIMIT,
+                limit: typeof logLimit === 'number' ? logLimit : null,
                 current: usageResult.current,
                 periodStart: period.start.toISOString(),
                 periodEnd: period.end.toISOString(),

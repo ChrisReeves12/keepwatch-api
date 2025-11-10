@@ -3,6 +3,10 @@ import { User, CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { hashPassword } from './crypt.service';
 import { slugify } from '../utils/slugify.util';
 import { getCache, setCache } from './redis.service';
+import {
+    getSubscriptionPlanEnrollmentByUserId,
+    findSubscriptionPlanByMachineName,
+} from './subscription.service';
 import { removeUserFromAllProjects, deleteProjectsByOwnerId } from './projects.service';
 import moment from 'moment';
 
@@ -148,42 +152,90 @@ export async function findUserById(id: string): Promise<User | null> {
     return toUser(doc);
 }
 
+interface UserUsageMetadataCache {
+    userCreatedAt: string;
+    subscriptionPlanId: string | null;
+    logLimit: number | null;
+}
+
+export interface UserUsageMetadata {
+    userCreatedAt: Date;
+    subscriptionPlanId: string | null;
+    logLimit?: number;
+}
+
 /**
- * Get user's createdAt date from cache or database
- * Cache TTL is 60 days since createdAt never changes
+ * Get user's createdAt along with subscription plan metadata.
+ * Results are cached for 10 minutes to reduce repeated Firestore reads.
  * @param userId - Firestore document ID string
- * @returns User's createdAt date or null if user not found
+ * @returns Usage metadata object or null if user not found
  */
-export async function getUserCreatedAt(userId: string): Promise<Date | null> {
-    const cacheKey = `user:${userId}:createdAt`;
+export async function getUserCreatedAtAndEnrollment(userId: string): Promise<UserUsageMetadata | null> {
+    const cacheKey = `user:${userId}:usageMetadata`;
 
     try {
-        const cachedCreatedAt = await getCache<string>(cacheKey);
-        if (cachedCreatedAt) {
-            console.log(`User createdAt cache hit for: ${userId}`);
-            return new Date(cachedCreatedAt);
+        const cachedMetadata = await getCache<UserUsageMetadataCache>(cacheKey);
+        if (cachedMetadata) {
+            console.log(`User usage metadata cache hit for: ${userId}`);
+            return {
+                userCreatedAt: new Date(cachedMetadata.userCreatedAt),
+                subscriptionPlanId: cachedMetadata.subscriptionPlanId,
+                logLimit: typeof cachedMetadata.logLimit === 'number' ? cachedMetadata.logLimit : undefined,
+            };
         }
     } catch (error) {
-        console.error('❌ Failed to get user createdAt from cache:', error);
+        console.error('❌ Failed to get user usage metadata from cache:', error);
     }
 
-    console.log(`User createdAt cache miss for: ${userId}, fetching from database`);
+    console.log(`User usage metadata cache miss for: ${userId}, fetching from database`);
 
     const user = await findUserById(userId);
 
-    if (user && user.createdAt) {
-        try {
-            console.log(`Caching user createdAt for: ${userId}`);
-            // Cache for 60 days since createdAt never changes
-            await setCache(cacheKey, user.createdAt.toISOString(), 60 * 24 * 60 * 60); // 60 days in seconds
-            console.log(`Successfully cached user createdAt for: ${userId}`);
-        } catch (error) {
-            console.error('❌ Failed to cache user createdAt:', error);
-        }
-        return user.createdAt;
+    if (!user || !user.createdAt) {
+        return null;
     }
 
-    return null;
+    let subscriptionPlanId: string | null = null;
+    let logLimit: number | undefined;
+
+    try {
+        if (user.userId) {
+            const enrollment: {subscriptionPlan: string} =
+                (await getSubscriptionPlanEnrollmentByUserId(user.userId)) || {subscriptionPlan: 'free'};
+
+            if (enrollment) {
+                subscriptionPlanId = enrollment.subscriptionPlan;
+
+                const plan = await findSubscriptionPlanByMachineName(enrollment.subscriptionPlan);
+                if (plan && typeof plan.logLimit === 'number') {
+                    logLimit = plan.logLimit;
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`❌ Failed to fetch subscription data for user ${userId}:`, error);
+    }
+
+    const metadata: UserUsageMetadata = {
+        userCreatedAt: user.createdAt,
+        subscriptionPlanId,
+        logLimit,
+    };
+
+    try {
+        const cachePayload: UserUsageMetadataCache = {
+            userCreatedAt: metadata.userCreatedAt.toISOString(),
+            subscriptionPlanId: metadata.subscriptionPlanId,
+            logLimit: typeof metadata.logLimit === 'number' ? metadata.logLimit : null,
+        };
+
+        await setCache(cacheKey, cachePayload, 10 * 60); // 10 minutes in seconds
+        console.log(`Successfully cached user usage metadata for: ${userId}`);
+    } catch (error) {
+        console.error('❌ Failed to cache user usage metadata:', error);
+    }
+
+    return metadata;
 }
 
 /**

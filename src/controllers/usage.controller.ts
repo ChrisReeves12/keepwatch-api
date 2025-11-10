@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import * as UsersService from '../services/users.service';
 import * as UsageService from '../services/usage.service';
-import { MONTHLY_LOG_LIMIT } from '../constants';
 
 /**
  * @swagger
@@ -29,16 +28,23 @@ import { MONTHLY_LOG_LIMIT } from '../constants';
  *                       example: 2500
  *                     limit:
  *                       type: number
- *                       description: Maximum number of logs allowed in the billing period
+ *                       nullable: true
+ *                       description: Maximum number of logs allowed in the billing period (null when unlimited)
  *                       example: 10000
  *                     remaining:
  *                       type: number
- *                       description: Number of logs remaining in the billing period
+ *                       nullable: true
+ *                       description: Number of logs remaining in the billing period (null when unlimited)
  *                       example: 7500
  *                     percentUsed:
  *                       type: number
- *                       description: Percentage of quota used
+ *                       nullable: true
+ *                       description: Percentage of quota used (null when unlimited)
  *                       example: 25.0
+ *                     isUnlimited:
+ *                       type: boolean
+ *                       description: Indicates whether the log usage is unlimited
+ *                       example: false
  *                 billingPeriod:
  *                   type: object
  *                   properties:
@@ -94,11 +100,11 @@ export const getUserQuota = async (req: Request, res: Response): Promise<void> =
             return;
         }
 
-        // Get user's createdAt from cache (with 60-day TTL)
-        const userCreatedAt = await UsersService.getUserCreatedAt(currentUser._id);
-        if (!userCreatedAt) {
+        // Get user's usage metadata (cached for 10 minutes)
+        const usageMetadata = await UsersService.getUserCreatedAtAndEnrollment(currentUser._id);
+        if (!usageMetadata) {
             res.status(500).json({
-                error: 'User creation date not found',
+                error: 'User usage metadata not found',
             });
             return;
         }
@@ -106,8 +112,8 @@ export const getUserQuota = async (req: Request, res: Response): Promise<void> =
         // Get quota information
         const quota = await UsageService.getUserQuota(
             currentUser._id,
-            userCreatedAt,
-            MONTHLY_LOG_LIMIT
+            usageMetadata.userCreatedAt,
+            usageMetadata.logLimit
         );
 
         res.json(quota);

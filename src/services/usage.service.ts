@@ -24,9 +24,10 @@ export interface UsageCheckResult {
 export interface UserQuota {
     logUsage: {
         current: number;
-        limit: number;
-        remaining: number;
-        percentUsed: number;
+        limit: number | null;
+        remaining: number | null;
+        percentUsed: number | null;
+        isUnlimited: boolean;
     };
     billingPeriod: {
         start: string; // ISO date string
@@ -113,7 +114,7 @@ export async function checkAndIncrementOwnerUsage(
     ownerId: string,
     createdAt: Date,
     increment: number,
-    limit: number
+    limit?: number
 ): Promise<UsageCheckResult> {
     if (!isCachingEnabled()) {
         // If Redis is disabled, allow the operation (for development/testing)
@@ -135,6 +136,9 @@ export async function checkAndIncrementOwnerUsage(
         // Calculate TTL in milliseconds (time until period ends, plus a small buffer)
         const ttlMs = Math.max(0, periodEnd.diff(now)) + 60000; // Add 1 minute buffer
 
+        const hasLimit = typeof limit === 'number' && limit > 0;
+        const effectiveLimit = hasLimit ? (limit as number) : Number.MAX_SAFE_INTEGER;
+
         // Construct the Redis key for the usage counter
         const usageKey = prefixKey(`usage:logging:owner:${ownerId}:period:${period.periodKey}`);
 
@@ -144,11 +148,11 @@ export async function checkAndIncrementOwnerUsage(
             1, // Number of keys
             usageKey, // KEYS[1]
             increment.toString(), // ARGV[1] - increment amount
-            limit.toString(), // ARGV[2] - limit
+            effectiveLimit.toString(), // ARGV[2] - limit
             Math.floor(ttlMs).toString() // ARGV[3] - TTL in milliseconds
         ) as [number, number];
 
-        const allowed = result[0] === 1;
+        const allowed = hasLimit ? result[0] === 1 : true;
         const current = result[1];
 
         return { allowed, current };
@@ -253,12 +257,15 @@ export async function getCurrentUsage(ownerId: string, periodKey: string): Promi
 export async function getUserQuota(
     ownerId: string,
     createdAt: Date,
-    limit: number
+    limit?: number
 ): Promise<UserQuota> {
     const period = getBillingPeriod(createdAt);
     const current = await getCurrentUsage(ownerId, period.periodKey);
-    const remaining = Math.max(0, limit - current);
-    const percentUsed = limit > 0 ? Math.min(100, (current / limit) * 100) : 0;
+    const hasLimit = typeof limit === 'number' && limit > 0;
+    const normalizedLimit: number | null = hasLimit ? (limit as number) : null;
+    const remaining = normalizedLimit !== null ? Math.max(0, normalizedLimit - current) : null;
+    const percentUsed =
+        normalizedLimit !== null && normalizedLimit > 0 ? Math.min(100, (current / normalizedLimit) * 100) : null;
 
     const now = moment.utc();
     const periodEnd = moment.utc(period.end);
@@ -267,9 +274,10 @@ export async function getUserQuota(
     return {
         logUsage: {
             current,
-            limit,
+            limit: normalizedLimit,
             remaining,
-            percentUsed: Math.round(percentUsed * 100) / 100, // Round to 2 decimal places
+            percentUsed: percentUsed === null ? null : Math.round(percentUsed * 100) / 100, // Round to 2 decimal places
+            isUnlimited: !hasLimit,
         },
         billingPeriod: {
             start: period.start.toISOString(),
