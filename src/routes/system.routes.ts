@@ -16,6 +16,18 @@ router.post(
     SystemController.createPlan,
 );
 
+router.post(
+    '/subscription-plans/enrollments',
+    requireSystemAdminRole('superadmin', 'editor'),
+    SystemController.createSubscriptionPlanEnrollment,
+);
+
+router.get(
+    '/subscription-plans/enrollments',
+    requireSystemAdminRole('superadmin', 'editor'),
+    SystemController.listSubscriptionPlanEnrollments,
+);
+
 router.get('/subscription-plans', SystemController.listSubscriptionPlans);
 
 router.put(

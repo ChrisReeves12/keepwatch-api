@@ -300,6 +300,15 @@ export async function getSubscriptionPlanEnrollmentByUserId(userId: string): Pro
     return toSubscriptionPlanEnrollment(enrollmentDoc);
 }
 
+export async function listAllSubscriptionPlanEnrollments(): Promise<SubscriptionPlanEnrollment[]> {
+    const collection = getSubscriptionPlanEnrollmentsCollection();
+    const snapshot = await collection.orderBy('createdAt', 'desc').get();
+
+    return snapshot.docs
+        .map(doc => toSubscriptionPlanEnrollment(doc))
+        .filter((enrollment): enrollment is SubscriptionPlanEnrollment => Boolean(enrollment));
+}
+
 export async function listSubscriptionPlanEnrollmentsByPlan(machineName: string): Promise<SubscriptionPlanEnrollment[]> {
     const collection = getSubscriptionPlanEnrollmentsCollection();
     const normalizedPlan = slugify(machineName);

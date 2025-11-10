@@ -3,6 +3,7 @@ import * as UsersService from '../services/users.service';
 import { CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode } from '../services/email-verification.service';
+import { getSubscriptionPlanEnrollmentByUserId } from '../services/subscription.service';
 
 /**
  * @swagger
@@ -184,8 +185,11 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
             is2FARequired: user.is2FARequired ?? false,
         };
 
+        const subscriptionPlanEnrollment = await getSubscriptionPlanEnrollmentByUserId(user.userId);
+
         res.json({
             user: userPayload,
+            subscriptionPlanEnrollment: subscriptionPlanEnrollment ?? null,
         });
     } catch (error: any) {
         console.error('Error fetching user:', error);
