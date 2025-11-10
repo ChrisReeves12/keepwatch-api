@@ -217,7 +217,25 @@ export async function deleteSubscriptionPlan(machineName: string): Promise<boole
         return false;
     }
 
-    await snapshot.docs[0].ref.delete();
+    const db = getFirestore();
+    if (!db) {
+        throw new Error('Firestore not connected');
+    }
+
+    const batch = db.batch();
+    const planDoc = snapshot.docs[0];
+
+    batch.delete(planDoc.ref);
+
+    const enrollmentsCollection = getSubscriptionPlanEnrollmentsCollection();
+    const enrollmentSnapshot = await enrollmentsCollection.where('subscriptionPlan', '==', normalizedMachineName).get();
+
+    enrollmentSnapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+    });
+
+    await batch.commit();
+
     return true;
 }
 

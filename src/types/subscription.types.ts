@@ -49,7 +49,7 @@ export interface UpdateSubscriptionPlanEnrollmentInput {
     price?: number;
 }
 
-export type SystemAdminRole = 'superuser' | 'editor' | 'viewer';
+export type SystemAdminRole = 'superadmin' | 'superuser' | 'editor' | 'viewer';
 
 export interface SystemAdmin {
     _id?: string;
