@@ -17,6 +17,9 @@ router.get('/:projectId/:logId', authenticate, LogsController.getLogById);
 // GET /api/v1/logs/:projectId/:logType/environments - Get unique environments for a project and log type - Requires JWT authentication
 router.get('/:projectId/:logType/environments', authenticate, LogsController.getEnvironmentsByProjectAndLogType);
 
+// GET /api/v1/logs/:projectId/:logType/categories - Get unique categories for a project and log type - Requires JWT authentication
+router.get('/:projectId/:logType/categories', authenticate, LogsController.getCategoriesByProjectAndLogType);
+
 // DELETE /api/v1/logs/:projectId - Purge logs - Requires JWT authentication and admin role
 router.delete('/:projectId', authenticate, LogsController.purgeProjectLogs);
 

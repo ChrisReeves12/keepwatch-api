@@ -131,6 +131,21 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
+        // Validate category if provided
+        if (logData.category !== undefined && typeof logData.category !== 'string') {
+            res.status(400).json({
+                error: 'category must be a string',
+            });
+
+            return;
+        }
+
+        const normalizedCategory =
+            typeof logData.category === 'string' && logData.category.trim().length > 0
+                ? logData.category.trim()
+                : 'default';
+        logData.category = normalizedCategory;
+
         // Validate logType
         if (logData.logType !== 'application' && logData.logType !== 'system') {
             res.status(400).json({
@@ -248,7 +263,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Publish to ingestion topic (alarm will be published after log is stored)
+        // Publish to the ingestion topic (alarm will be published after the log is stored)
         const messageId = await PubSubService.publishMessage(LOG_INGESTION_TOPIC, logData);
 
         res.status(202).json({
@@ -256,6 +271,7 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
             messageId,
             logLevel: logData.level,
             logMessage: logData.message,
+            category: logData.category,
             environment: logData.environment,
             hostname: logData.hostname,
         });
@@ -316,6 +332,13 @@ export const createLog = async (req: Request, res: Response): Promise<void> => {
  *                     items:
  *                       type: string
  *                 description: Filter by environment name(s) - can be a single string or array of strings
+ *               category:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Filter by category name(s) - can be a single string or array of strings
  *               logType:
  *                 type: string
  *                 enum: [application, system]
@@ -624,6 +647,7 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
         const pageSize = requestBody.pageSize ?? 50;
         let level = requestBody.level;
         let environment = requestBody.environment;
+        let category = requestBody.category;
         const logType = requestBody.logType;
         const hostname = requestBody.hostname;
         const startTime = requestBody.startTime;
@@ -702,6 +726,44 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             } else if (typeof environment !== 'string') {
                 res.status(400).json({
                     error: 'Environment must be a string or array of strings',
+                });
+                return;
+            }
+        }
+
+        // Validate category parameter
+        if (category !== undefined) {
+            if (Array.isArray(category)) {
+                if (category.length === 0) {
+                    res.status(400).json({
+                        error: 'Category array cannot be empty',
+                    });
+                    return;
+                }
+                if (category.length > 10) {
+                    res.status(400).json({
+                        error: 'Category array cannot contain more than 10 items',
+                    });
+                    return;
+                }
+                if (!category.every(c => typeof c === 'string' && c.trim().length > 0)) {
+                    res.status(400).json({
+                        error: 'All category values must be non-empty strings',
+                    });
+                    return;
+                }
+                category = category.map(c => c.trim());
+            } else if (typeof category === 'string') {
+                if (category.trim().length === 0) {
+                    res.status(400).json({
+                        error: 'Category must be a non-empty string',
+                    });
+                    return;
+                }
+                category = category.trim();
+            } else {
+                res.status(400).json({
+                    error: 'Category must be a string or array of strings',
                 });
                 return;
             }
@@ -864,6 +926,7 @@ export const queryLogsByProjectId = async (req: Request, res: Response): Promise
             pageSize,
             level,
             environment,
+            category,
             logType,
             hostname,
             startTime,
@@ -1037,6 +1100,155 @@ export const getEnvironmentsByProjectAndLogType = async (req: Request, res: Resp
         console.error('Error fetching environments:', error);
         res.status(500).json({
             error: 'Failed to fetch environments',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/logs/{projectId}/{logType}/categories:
+ *   get:
+ *     summary: Get all unique category values for a project and log type
+ *     description: Returns all unique category values with their counts for a specific project and log type using Typesense facet search. Requires JWT authentication via Bearer token. The user must be a member of the project.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: logType
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [application, system]
+ *         description: Log type to filter by (application or system)
+ *     responses:
+ *       200:
+ *         description: Categories retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 categories:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       value:
+ *                         type: string
+ *                         example: backend
+ *                       count:
+ *                         type: integer
+ *                         example: 425
+ *       400:
+ *         description: Invalid logType parameter
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getCategoriesByProjectAndLogType = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Verify JWT authentication
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get projectId and logType from path params
+        const { projectId, logType } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
+
+        if (!logType) {
+            res.status(400).json({
+                error: 'Missing required path parameter: logType',
+            });
+            return;
+        }
+
+        // Validate logType
+        if (logType !== 'application' && logType !== 'system') {
+            res.status(400).json({
+                error: 'logType must be either "application" or "system"',
+            });
+            return;
+        }
+
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is a member of the project (any role)
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Get categories using facet search
+        const categories = await LogsService.getCategoriesByProjectAndLogType(projectId, logType);
+
+        res.json({
+            categories,
+        });
+    } catch (error: any) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({
+            error: 'Failed to fetch categories',
             details: error.message,
         });
     }

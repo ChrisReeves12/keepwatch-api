@@ -4,6 +4,46 @@ import { CreateProjectInput, UpdateProjectInput, UpdateApiKeyInput, CreateAlarmI
 import * as UsersService from '../services/users.service';
 import validator from 'validator';
 
+const MAX_ALARM_CATEGORIES = 10;
+
+const normalizeAlarmCategories = (input: any): { categories?: string[]; error?: string } => {
+    if (input === undefined || input === null) {
+        return { categories: undefined };
+    }
+
+    let categoriesArray: unknown[];
+
+    if (Array.isArray(input)) {
+        categoriesArray = input;
+    } else if (typeof input === 'string') {
+        categoriesArray = [input];
+    } else {
+        return { error: 'categories must be a string or an array of strings' };
+    }
+
+    const normalized = categoriesArray
+        .map(item => (typeof item === 'string' ? item.trim() : ''))
+        .filter(item => item.length > 0);
+
+    if (normalized.length === 0) {
+        return { error: 'categories must contain at least one non-empty string' };
+    }
+
+    const unique: string[] = [];
+    for (const category of normalized) {
+        const exists = unique.some(existing => existing.toLowerCase() === category.toLowerCase());
+        if (!exists) {
+            unique.push(category);
+        }
+    }
+
+    if (unique.length > MAX_ALARM_CATEGORIES) {
+        return { error: `categories cannot contain more than ${MAX_ALARM_CATEGORIES} items` };
+    }
+
+    return { categories: unique };
+};
+
 /**
  * @swagger
  * /api/v1/projects:
@@ -1621,6 +1661,14 @@ export const listProjectAlarms = async (req: Request, res: Response): Promise<vo
  *               environment:
  *                 type: string
  *                 example: production
+ *               categories:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Optional category filter(s). If provided, the alarm only triggers for logs within these categories.
+ *                 example: ["backend", "payments"]
  *               deliveryMethods:
  *                 type: object
  *                 properties:
@@ -1728,6 +1776,18 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
             });
             return;
         }
+
+        const rawCategories = (req.body as any).categories ?? (req.body as any).category ?? alarmData.categories;
+        const { categories: normalizedCategories, error: categoriesError } = normalizeAlarmCategories(rawCategories);
+
+        if (categoriesError) {
+            res.status(400).json({
+                error: categoriesError,
+            });
+            return;
+        }
+
+        alarmData.categories = normalizedCategories;
 
         if (!alarmData.deliveryMethods || typeof alarmData.deliveryMethods !== 'object') {
             res.status(400).json({
@@ -1988,6 +2048,14 @@ export const createProjectAlarm = async (req: Request, res: Response): Promise<v
  *               environment:
  *                 type: string
  *                 example: production
+ *               categories:
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *                 description: Optional category filter(s). If provided, the alarm only triggers for logs within these categories.
+ *                 example: ["backend", "payments"]
  *               deliveryMethods:
  *                 type: object
  *                 properties:
@@ -2097,6 +2165,18 @@ export const updateProjectAlarm = async (req: Request, res: Response): Promise<v
             });
             return;
         }
+
+        const rawCategories = (req.body as any).categories ?? (req.body as any).category ?? alarmData.categories;
+        const { categories: normalizedCategories, error: categoriesError } = normalizeAlarmCategories(rawCategories);
+
+        if (categoriesError) {
+            res.status(400).json({
+                error: categoriesError,
+            });
+            return;
+        }
+
+        alarmData.categories = normalizedCategories;
 
         if (!alarmData.deliveryMethods || typeof alarmData.deliveryMethods !== 'object') {
             res.status(400).json({

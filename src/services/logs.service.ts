@@ -19,6 +19,7 @@ const COLLECTION_NAME = 'logs';
  * @param environment - The environment name
  * @param level - The log level
  * @param message - The log message
+ * @param category - The log category
  * @returns A unique key string for Redis storage
  */
 function generateAlarmDebounceKey(
@@ -26,13 +27,15 @@ function generateAlarmDebounceKey(
     projectId: string,
     environment: string,
     level: LogLevel,
-    message: string
+    message: string,
+    category: string
 ): string {
     const messageHash = !message ? '---' : createHash('sha256').update(message).digest('hex').substring(0, 24);
     const normalizedEnv = environment.toLowerCase();
     const normalizedLevel = level.toUpperCase();
+    const normalizedCategory = category.toLowerCase();
 
-    return `alarm:debounce:${projectId}:${logType}:${normalizedEnv}:${normalizedLevel}:${messageHash}`;
+    return `alarm:debounce:${projectId}:${logType}:${normalizedEnv}:${normalizedLevel}:${normalizedCategory}:${messageHash}`;
 }
 
 /**
@@ -87,12 +90,17 @@ export async function processLogAlarm(logData: CreateLogInput, logId: string): P
 
         const environmentMatches = alarm.environment.toLowerCase() === logData.environment.toLowerCase();
 
+        const logCategory = (logData.category || 'default').toLowerCase();
+        const categoriesMatch = !alarm.categories || alarm.categories.length === 0
+            ? true
+            : alarm.categories.some(category => category.toLowerCase() === logCategory);
+
         // Handle null message (null means "match any message")
         const messageMatches = !alarm.message
             ? true
             : logData.message.toLowerCase().includes(alarm.message.toLowerCase());
 
-        if (logTypeMatches && levelMatches && environmentMatches && messageMatches) {
+        if (logTypeMatches && levelMatches && environmentMatches && categoriesMatch && messageMatches) {
             await deliverAlarm(alarm, logData, project.name, logId);
         }
     }
@@ -115,12 +123,14 @@ async function deliverAlarm(
 ): Promise<void> {
     // Check if this alarm was recently sent (debouncing)
     if (isCachingEnabled()) {
+        const logCategory = (logData.category || 'default').toLowerCase();
         const debounceKey = generateAlarmDebounceKey(
             logData.logType,
             logData.projectId,
             logData.environment,
             logData.level as LogLevel,
-            logData.message || ''
+            logData.message || '',
+            logCategory
         );
 
         const existingAlert = await getCache<string>(debounceKey);
@@ -158,6 +168,7 @@ async function deliverAlarm(
         projectId: logData.projectId,
         level: logData.level,
         environment: logData.environment,
+        category: logData.category || 'default',
         logType: logData.logType,
         message: logData.message,
         request: logData.request || null,
@@ -236,6 +247,10 @@ async function deliverEmailAlarm(
                         <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.environment}</td>
                     </tr>
                     <tr>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Category:</strong></td>
+                        <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.category}</td>
+                    </tr>
+                    <tr>
                         <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;"><strong>Log Type:</strong></td>
                         <td style="padding: 8px; background-color: #fff; border: 1px solid #ddd;">${alarmDetails.logType}</td>
                     </tr>
@@ -306,6 +321,11 @@ async function deliverSlackAlarm(
                     {
                         title: 'Environment',
                         value: alarmDetails.environment,
+                        short: true,
+                    },
+                    {
+                        title: 'Category',
+                        value: alarmDetails.category,
                         short: true,
                     },
                     {
@@ -422,6 +442,7 @@ export async function createLog(logData: CreateLogInput): Promise<Log> {
     const log: Omit<Log, '_id'> = {
         level: logData.level,
         environment: logData.environment,
+        category: logData.category || 'default',
         projectId: logData.projectId,
         request: logData.request,
         projectObjectId: projectDocId, // Store the Firestore document ID
@@ -460,6 +481,7 @@ async function typesenseDocToLog(doc: any, projectId: string): Promise<Log> {
         _id: doc.firestoreId, // Include the Firestore document ID
         level: doc.level,
         environment: doc.environment,
+        category: doc.category || 'default',
         projectId: doc.projectId || projectId,
         projectObjectId: projectDocId,
         message: doc.message,
@@ -499,6 +521,7 @@ export async function getLogsByProjectId(
     pageSize: number = 50,
     level?: string | string[],
     environment?: string | string[],
+    category?: string | string[],
     logType?: string,
     hostname?: string | string[],
     startTime?: number,
@@ -514,34 +537,47 @@ export async function getLogsByProjectId(
     // Build filter_by clause
     const filterBy: string[] = [`projectId:${projectId}`];
 
+    const toTypesenseFilterValue = (value: string): string => {
+        const trimmed = value.trim();
+        return /[\s,]/.test(trimmed) ? `"${trimmed.replace(/"/g, '\\"')}"` : trimmed;
+    };
+
     if (level) {
         if (Array.isArray(level)) {
             // For multiple levels, use Typesense array syntax: level:[error,warn,info]
-            filterBy.push(`level:[${level.join(',')}]`);
+            filterBy.push(`level:[${level.map(l => toTypesenseFilterValue(l)).join(',')}]`);
         } else {
-            filterBy.push(`level:${level}`);
+            filterBy.push(`level:${toTypesenseFilterValue(level)}`);
         }
     }
 
     if (environment) {
         if (Array.isArray(environment)) {
             // For multiple environments, use Typesense array syntax
-            filterBy.push(`environment:[${environment.join(',')}]`);
+            filterBy.push(`environment:[${environment.map(env => toTypesenseFilterValue(env)).join(',')}]`);
         } else {
-            filterBy.push(`environment:${environment}`);
+            filterBy.push(`environment:${toTypesenseFilterValue(environment)}`);
+        }
+    }
+
+    if (category) {
+        if (Array.isArray(category)) {
+            filterBy.push(`category:[${category.map(cat => toTypesenseFilterValue(cat)).join(',')}]`);
+        } else {
+            filterBy.push(`category:${toTypesenseFilterValue(category)}`);
         }
     }
 
     if (logType) {
-        filterBy.push(`logType:${logType}`);
+        filterBy.push(`logType:${toTypesenseFilterValue(logType)}`);
     }
 
     if (hostname) {
         if (Array.isArray(hostname)) {
             // For multiple hostnames, use Typesense array syntax
-            filterBy.push(`hostname:[${hostname.join(',')}]`);
+            filterBy.push(`hostname:[${hostname.map(host => toTypesenseFilterValue(host)).join(',')}]`);
         } else {
-            filterBy.push(`hostname:${hostname}`);
+            filterBy.push(`hostname:${toTypesenseFilterValue(hostname)}`);
         }
     }
 
@@ -756,6 +792,7 @@ export async function indexLogInSearch(logData: CreateLogInput | Log): Promise<v
             firestoreId: '_id' in logData ? logData._id : undefined, // Store Firestore document ID
             level: logData.level,
             environment: logData.environment,
+            category: logData.category || 'default',
             projectId: logData.projectId,
             message: logData.message,
             logType: logData.logType,
@@ -1176,6 +1213,44 @@ export async function getEnvironmentsByProjectAndLogType(
 
     // Map to our return format
     return environmentFacet.counts.map((count: any) => ({
+        value: count.value,
+        count: count.count,
+    }));
+}
+
+/**
+ * Get all unique category values for a project and log type using Typesense facet search
+ * @param projectId - The projectId to get categories for
+ * @param logType - The log type to filter by ("application" or "system")
+ * @returns Array of unique category names with their counts
+ */
+export async function getCategoriesByProjectAndLogType(
+    projectId: string,
+    logType: string
+): Promise<Array<{ value: string; count: number }>> {
+    const typesenseClient = getTypesenseClient();
+
+    const filterBy = `projectId:${projectId} && logType:${logType}`;
+
+    const searchResults = await typesenseClient
+        .collections('logs')
+        .documents()
+        .search({
+            q: '*',
+            query_by: 'message',
+            filter_by: filterBy,
+            facet_by: 'category',
+            per_page: 0,
+        });
+
+    const facetCounts = searchResults.facet_counts || [];
+    const categoryFacet = facetCounts.find((facet: any) => facet.field_name === 'category');
+
+    if (!categoryFacet || !categoryFacet.counts) {
+        return [];
+    }
+
+    return categoryFacet.counts.map((count: any) => ({
         value: count.value,
         count: count.count,
     }));

@@ -30,6 +30,7 @@ export interface Log {
     _id?: string; // Firestore document ID
     level: string;
     environment: string;
+    category: string;
     request?: RequestInfo;
     projectId: string; // Project slug identifier
     projectObjectId: string; // Firestore document ID of the project
@@ -50,6 +51,7 @@ export interface Log {
 export interface CreateLogInput {
     level: string;
     environment: string;
+    category?: string;
     projectId: string;
     message: string;
     request?: RequestInfo;
@@ -109,6 +111,7 @@ export interface QueryLogsRequest {
     pageSize?: number;
     level?: string | string[];
     environment?: string | string[];
+    category?: string | string[];
     logType?: string; // Single log type filter: "application" or "system"
     hostname?: string | string[]; // Filter by hostname(s) - can be a single string or array of strings
     startTime?: number; // Unix timestamp in milliseconds - start of time range

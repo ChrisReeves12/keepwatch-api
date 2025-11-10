@@ -148,6 +148,7 @@ export interface ProjectAlarm {
     message?: string; // null or undefined means "match any message"
     level: LogLevel | LogLevel[];
     environment: string;
+    categories?: string[];
     deliveryMethods: AlarmDeliveryMethods;
 }
 

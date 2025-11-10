@@ -211,7 +211,7 @@ export async function listSubscriptionPlans(_req: Request, res: Response): Promi
  *     summary: Update a subscription plan
  *     description: Update an existing subscription plan's details. Only system admins with role `superadmin`, `superuser`, or `editor` may perform this action.
  *     tags: [System]
-     security:
+ *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - name: machineName

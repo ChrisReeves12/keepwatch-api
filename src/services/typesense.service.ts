@@ -72,6 +72,11 @@ const logsCollectionSchema = {
             facet: true,
         },
         {
+            name: 'category',
+            type: 'string' as const,
+            facet: true,
+        },
+        {
             name: 'projectId',
             type: 'string' as const,
             facet: true,

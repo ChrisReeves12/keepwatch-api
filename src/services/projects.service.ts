@@ -1230,13 +1230,37 @@ function findMatchingAlarm(existingAlarms: ProjectAlarm[], newAlarm: CreateAlarm
             }
 
             // Both strings
-            return String(existing.message).toLowerCase() === String(existing.message).toLowerCase();
+            return String(existing.message).toLowerCase() === String(newAlarm.message).toLowerCase();
+        })();
+
+        const categoriesMatch = (() => {
+            const existingCategories = existing.categories && existing.categories.length > 0
+                ? existing.categories.map(category => category.toLowerCase())
+                : undefined;
+            const newCategories = newAlarm.categories && newAlarm.categories.length > 0
+                ? newAlarm.categories.map(category => category.toLowerCase())
+                : undefined;
+
+            if (!existingCategories && !newCategories) {
+                return true;
+            }
+
+            if (!existingCategories || !newCategories) {
+                return false;
+            }
+
+            if (existingCategories.length !== newCategories.length) {
+                return false;
+            }
+
+            return existingCategories.every(category => newCategories.includes(category));
         })();
 
         return messagesMatch &&
             existing.environment.toLowerCase() === newAlarm.environment.toLowerCase() &&
             existing.logType.toLowerCase() === newAlarm.logType.toLowerCase() &&
-            levelsMatch;
+            levelsMatch &&
+            categoriesMatch;
     });
 }
 
@@ -1276,6 +1300,7 @@ export async function addAlarmToProject(
             if (alarm.id === matchingAlarm.id) {
                 return {
                     ...alarm,
+                    categories: alarmData.categories && alarmData.categories.length > 0 ? [...alarmData.categories] : undefined,
                     deliveryMethods: alarmData.deliveryMethods,
                 };
             }
@@ -1301,6 +1326,7 @@ export async function addAlarmToProject(
         message: alarmData.message?.trim(),
         level: alarmData.level,
         environment: alarmData.environment.trim(),
+        categories: alarmData.categories && alarmData.categories.length > 0 ? [...alarmData.categories] : undefined,
         deliveryMethods: alarmData.deliveryMethods,
     };
 
@@ -1372,6 +1398,7 @@ export async function updateAlarmById(
         message: alarmData.message?.trim(),
         level: alarmData.level,
         environment: alarmData.environment.trim(),
+        categories: alarmData.categories && alarmData.categories.length > 0 ? [...alarmData.categories] : undefined,
         deliveryMethods: alarmData.deliveryMethods,
     };
 
