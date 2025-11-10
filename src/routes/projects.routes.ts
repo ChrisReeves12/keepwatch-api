@@ -21,6 +21,10 @@ router.delete('/:projectId/api-keys/:apiKeyId', authenticate, ProjectsController
 router.put('/:projectId/users/:userId/role', authenticate, ProjectsController.updateUserRoleOnProject);
 router.delete('/:projectId/users/:userId', authenticate, ProjectsController.removeUserFromProject);
 
+// Invite routes
+router.post('/:projectId/invite/send', authenticate, ProjectsController.sendUserInvite);
+router.get('/:projectId/invite/:inviteId', ProjectsController.verifyProjectInvite);
+
 // Alarm routes
 router.get('/:projectId/alarms', authenticate, ProjectsController.listProjectAlarms);
 router.post('/:projectId/alarms', authenticate, ProjectsController.createProjectAlarm);

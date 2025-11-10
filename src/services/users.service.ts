@@ -200,8 +200,8 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
 
     try {
         if (user.userId) {
-            const enrollment: {subscriptionPlan: string} =
-                (await getSubscriptionPlanEnrollmentByUserId(user.userId)) || {subscriptionPlan: 'free'};
+            const enrollment: { subscriptionPlan: string } =
+                (await getSubscriptionPlanEnrollmentByUserId(user.userId)) || { subscriptionPlan: 'free' };
 
             if (enrollment) {
                 subscriptionPlanId = enrollment.subscriptionPlan;

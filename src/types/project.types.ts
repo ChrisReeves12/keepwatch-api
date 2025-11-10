@@ -9,6 +9,21 @@ export interface ProjectUser {
 }
 
 /**
+ * Project invite structure
+ */
+export interface ProjectInvite {
+    _id: string;
+    token: string;
+    projectId: string;
+    senderUserId: string;
+    recipientEmail: string;
+    recipientUserId: string | null;
+    recipientRole: 'viewer' | 'editor' | 'admin';
+    expiresAt: Date;
+    createdAt: Date;
+}
+
+/**
  * IP restrictions for API key
  */
 export interface IpRestrictions {

@@ -3,8 +3,13 @@ import * as ProjectsService from '../services/projects.service';
 import { CreateProjectInput, UpdateProjectInput, UpdateApiKeyInput, CreateAlarmInput } from '../types/project.types';
 import * as UsersService from '../services/users.service';
 import validator from 'validator';
+import * as ProjectInvitesService from '../services/project-invites.service';
+import { sendEmail } from '../services/mail.service';
+import moment from 'moment';
 
 const MAX_ALARM_CATEGORIES = 10;
+const PROJECT_ROLE_VALUES = ['viewer', 'editor', 'admin'] as const;
+type ProjectRole = typeof PROJECT_ROLE_VALUES[number];
 
 const normalizeAlarmCategories = (input: any): { categories?: string[]; error?: string } => {
     if (input === undefined || input === null) {
@@ -1489,6 +1494,171 @@ export const removeUserFromProject = async (req: Request, res: Response): Promis
         console.error('Error removing user from project:', error);
         res.status(500).json({
             error: 'Failed to remove user from project',
+            details: error.message,
+        });
+    }
+};
+
+export const sendUserInvite = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { projectId } = req.params;
+        const { email, role } = req.body ?? {};
+
+        if (!email || typeof email !== 'string' || !validator.isEmail(email)) {
+            res.status(400).json({
+                error: 'A valid email address is required',
+            });
+            return;
+        }
+
+        const normalizedRoleInput = typeof role === 'string' ? role.trim().toLowerCase() : '';
+        if (!normalizedRoleInput || !PROJECT_ROLE_VALUES.includes(normalizedRoleInput as ProjectRole)) {
+            res.status(400).json({
+                error: `Invalid role. Must be one of: ${PROJECT_ROLE_VALUES.join(', ')}`,
+            });
+            return;
+        }
+
+        if (!process.env.WEB_FRONTEND_URL) {
+            res.status(500).json({
+                error: 'WEB_FRONTEND_URL is not configured',
+            });
+            return;
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        const senderUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!senderUser || !senderUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const senderMembership = project.users.find(pu => pu.id === senderUser._id);
+        if (
+            !senderMembership ||
+            (senderMembership.role !== 'admin' && senderMembership.role !== 'editor')
+        ) {
+            res.status(403).json({
+                error: 'Forbidden: Only project admins and editors can send invites',
+            });
+            return;
+        }
+
+        const existingRecipient = await UsersService.findUserByEmail(normalizedEmail);
+        if (existingRecipient?._id) {
+            const alreadyMember = project.users.some(pu => pu.id === existingRecipient._id);
+            if (alreadyMember) {
+                res.status(400).json({
+                    error: 'User is already a member of this project',
+                });
+                return;
+            }
+        }
+
+        const recipientRole = normalizedRoleInput as ProjectRole;
+
+        const invite = await ProjectInvitesService.createProjectInvite({
+            projectId: project.projectId,
+            senderUserId: senderUser._id,
+            recipientEmail: normalizedEmail,
+            recipientUserId: existingRecipient?._id ?? null,
+            recipientRole,
+        });
+
+        const webUrl = `${process.env.WEB_FRONTEND_URL}/projects/invite/${invite._id}?token=${invite.token}`;
+        const projectName = project.name;
+        const senderName = senderUser.name || senderUser.email || 'A teammate';
+
+        const inviteExpiryFormatted = moment(invite.expiresAt).utc().format('MMMM D, YYYY h:mm A [UTC]');
+
+        const emailContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">You're invited to join ${projectName}</h2>
+                <p>${senderName} has invited you to collaborate on the project <strong>${projectName}</strong> as a <strong>${recipientRole}</strong>.</p>
+                <p>Click the button below to accept your invite:</p>
+                <p style="text-align: center;">
+                    <a href="${webUrl}" style="display: inline-block; padding: 12px 24px; background-color: #1f2937; color: #ffffff; text-decoration: none; border-radius: 4px;">Accept Invite</a>
+                </p>
+                <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #555;">${webUrl}</p>
+                <p>This invite will expire on ${inviteExpiryFormatted}.</p>
+            </div>
+        `;
+
+        await sendEmail(
+            [normalizedEmail],
+            `You're invited to join the project: ${projectName} on KeepWatch`,
+            emailContent
+        );
+
+        res.status(201).json({
+            message: 'Project invite sent successfully',
+            invite: {
+                inviteId: invite._id,
+                expiresAt: invite.expiresAt,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error sending project invite:', error);
+        res.status(500).json({
+            error: 'Failed to send project invite',
+            details: error.message,
+        });
+    }
+};
+
+export const verifyProjectInvite = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { projectId, inviteId } = req.params;
+        const token = typeof req.query.token === 'string' ? req.query.token : null;
+
+        if (!token) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        const invite = await ProjectInvitesService.verifyProjectInvite(projectId, inviteId, token);
+
+        if (!invite) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        res.json({
+            invite: {
+                inviteId: invite._id,
+                projectId: invite.projectId,
+                recipientEmail: invite.recipientEmail,
+                recipientRole: invite.recipientRole,
+                expiresAt: invite.expiresAt,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error verifying project invite:', error);
+        res.status(500).json({
+            error: 'Failed to verify project invite',
             details: error.message,
         });
     }
