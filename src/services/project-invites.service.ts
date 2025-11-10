@@ -90,17 +90,12 @@ export async function findProjectInviteById(inviteId: string): Promise<ProjectIn
 }
 
 export async function verifyProjectInvite(
-    projectId: string,
     inviteId: string,
     token: string
 ): Promise<ProjectInvite | null> {
     const invite = await findProjectInviteById(inviteId);
 
     if (!invite) {
-        return null;
-    }
-
-    if (invite.projectId !== projectId) {
         return null;
     }
 

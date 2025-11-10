@@ -1499,6 +1499,68 @@ export const removeUserFromProject = async (req: Request, res: Response): Promis
     }
 };
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/invite/send:
+ *   post:
+ *     summary: Send a project invite
+ *     description: Sends an email invitation to join a project. Only project admins and editors can send invites.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, role]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               role:
+ *                 type: string
+ *                 enum: [admin, editor, viewer]
+ *           example:
+ *             email: "teammate@example.com"
+ *             role: "viewer"
+ *     responses:
+ *       201:
+ *         description: Invite created and email sent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 invite:
+ *                   type: object
+ *                   properties:
+ *                     inviteId:
+ *                       type: string
+ *                     expiresAt:
+ *                       type: string
+ *                       format: date-time
+ *       400:
+ *         description: Invalid input or user already a member
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Project or user not found
+ *       500:
+ *         description: Server error
+ */
 export const sendUserInvite = async (req: Request, res: Response): Promise<void> => {
     try {
         if (!req.user) {
@@ -1591,7 +1653,7 @@ export const sendUserInvite = async (req: Request, res: Response): Promise<void>
 
         const emailContent = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #333;">You're invited to join ${projectName}</h2>
+                <h2 style="color: #333;">You're invited to join the project: ${projectName} on KeepWatch</h2>
                 <p>${senderName} has invited you to collaborate on the project <strong>${projectName}</strong> as a <strong>${recipientRole}</strong>.</p>
                 <p>Click the button below to accept your invite:</p>
                 <p style="text-align: center;">
@@ -1625,9 +1687,58 @@ export const sendUserInvite = async (req: Request, res: Response): Promise<void>
     }
 };
 
+/**
+ * @swagger
+ * /api/v1/projects/invite/{inviteId}:
+ *   get:
+ *     summary: Verify a project invite
+ *     description: Verifies a project invite token and returns invite details if valid.
+ *     tags: [Projects]
+ *     parameters:
+ *       - in: path
+ *         name: inviteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The unique identifier of the invite
+ *       - in: query
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The invite verification token
+ *     responses:
+ *       200:
+ *         description: Invite is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 invite:
+ *                   type: object
+ *                   properties:
+ *                     inviteId:
+ *                       type: string
+ *                     projectId:
+ *                       type: string
+ *                     recipientEmail:
+ *                       type: string
+ *                       format: email
+ *                     recipientRole:
+ *                       type: string
+ *                       enum: [admin, editor, viewer]
+ *                     expiresAt:
+ *                       type: string
+ *                       format: date-time
+ *       403:
+ *         description: Invalid or expired invite
+ *       500:
+ *         description: Server error
+ */
 export const verifyProjectInvite = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { projectId, inviteId } = req.params;
+        const { inviteId } = req.params;
         const token = typeof req.query.token === 'string' ? req.query.token : null;
 
         if (!token) {
@@ -1637,7 +1748,7 @@ export const verifyProjectInvite = async (req: Request, res: Response): Promise<
             return;
         }
 
-        const invite = await ProjectInvitesService.verifyProjectInvite(projectId, inviteId, token);
+        const invite = await ProjectInvitesService.verifyProjectInvite(inviteId, token);
 
         if (!invite) {
             res.status(403).json({
@@ -1652,6 +1763,7 @@ export const verifyProjectInvite = async (req: Request, res: Response): Promise<
                 projectId: invite.projectId,
                 recipientEmail: invite.recipientEmail,
                 recipientRole: invite.recipientRole,
+                recipientUserId: invite.recipientUserId,
                 expiresAt: invite.expiresAt,
             },
         });
