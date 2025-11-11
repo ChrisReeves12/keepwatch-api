@@ -137,6 +137,29 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+        const ownerUsageMetadata = await UsersService.getUserCreatedAtAndEnrollment(creatorUser._id);
+        if (!ownerUsageMetadata) {
+            res.status(500).json({
+                error: 'Owner usage metadata not found',
+            });
+            return;
+        }
+
+        const { projectLimit } = ownerUsageMetadata;
+
+        if (typeof projectLimit === 'number') {
+            const currentProjectCount = await ProjectsService.countProjectsByOwnerId(creatorUser._id);
+            
+            if (currentProjectCount >= projectLimit) {
+                res.status(403).json({
+                    error: 'Project limit exceeded',
+                    limit: projectLimit,
+                    current: currentProjectCount,
+                });
+                return;
+            }
+        }
+
         const project = await ProjectsService.createProject(projectData, creatorUser._id);
 
         res.status(201).json({

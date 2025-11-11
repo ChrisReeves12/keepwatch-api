@@ -160,12 +160,14 @@ interface UserUsageMetadataCache {
     userCreatedAt: string;
     subscriptionPlanId: string | null;
     logLimit: number | null;
+    projectLimit: number | null;
 }
 
 export interface UserUsageMetadata {
     userCreatedAt: Date;
     subscriptionPlanId: string | null;
     logLimit?: number;
+    projectLimit?: number;
 }
 
 /**
@@ -185,6 +187,7 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
                 userCreatedAt: new Date(cachedMetadata.userCreatedAt),
                 subscriptionPlanId: cachedMetadata.subscriptionPlanId,
                 logLimit: typeof cachedMetadata.logLimit === 'number' ? cachedMetadata.logLimit : undefined,
+                projectLimit: typeof cachedMetadata.projectLimit === 'number' ? cachedMetadata.projectLimit : undefined,
             };
         }
     } catch (error) {
@@ -201,6 +204,7 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
 
     let subscriptionPlanId: string | null = null;
     let logLimit: number | undefined;
+    let projectLimit: number | undefined;
 
     try {
         if (user.userId) {
@@ -211,8 +215,13 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
                 subscriptionPlanId = enrollment.subscriptionPlan;
 
                 const plan = await findSubscriptionPlanByMachineName(enrollment.subscriptionPlan);
-                if (plan && typeof plan.logLimit === 'number') {
-                    logLimit = plan.logLimit;
+                if (plan) {
+                    if (typeof plan.logLimit === 'number') {
+                        logLimit = plan.logLimit;
+                    }
+                    if (typeof plan.projectLimit === 'number') {
+                        projectLimit = plan.projectLimit;
+                    }
                 }
             }
         }
@@ -224,6 +233,7 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
         userCreatedAt: user.createdAt,
         subscriptionPlanId,
         logLimit,
+        projectLimit,
     };
 
     try {
@@ -231,6 +241,7 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
             userCreatedAt: metadata.userCreatedAt.toISOString(),
             subscriptionPlanId: metadata.subscriptionPlanId,
             logLimit: typeof metadata.logLimit === 'number' ? metadata.logLimit : null,
+            projectLimit: typeof metadata.projectLimit === 'number' ? metadata.projectLimit : null,
         };
 
         await setCache(cacheKey, cachePayload, 10 * 60); // 10 minutes in seconds

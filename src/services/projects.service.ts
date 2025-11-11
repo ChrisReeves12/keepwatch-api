@@ -1530,3 +1530,9 @@ export async function deleteProjectAlarm(projectId: string, alarmId?: string): P
 
     return true;
 }
+
+export async function countProjectsByOwnerId(ownerId: string): Promise<number> {
+    const collection = getProjectsCollection();
+    const snapshot = await collection.where('ownerId', '==', ownerId).get();
+    return snapshot.size;
+}
