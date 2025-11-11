@@ -34,7 +34,15 @@ jest.mock('../services/pubsub.service', () => ({
 }));
 
 jest.mock('../services/mail.service', () => ({
-    sendEmail: jest.fn().mockResolvedValue(undefined),
+    sendEmail: jest.fn().mockImplementation((content) => Promise.resolve({
+        hasError: false,
+        data: {
+            id: 'mail-send-id',
+            message: 'Message sent',
+            status: 200,
+        },
+        htmlContent: content,
+    })),
 }));
 
 jest.mock('../services/usage.service', () => ({

@@ -47,7 +47,7 @@ export async function sendEmail(to: string[], subject: string, content: string, 
             html: htmlContent,
         });
 
-        return { hasError: false, data };
+        return { hasError: false, data, htmlContent };
     } catch (error: any) {
         console.error('An error occurred while sending email via Mailgun.', error);
         return { hasError: true, error }
