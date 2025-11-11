@@ -34,6 +34,8 @@ export async function storeEmailVerificationCode(
 ): Promise<void> {
     const collection = getVerificationCodesCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const existingSnapshot = await collection
         .where('userId', '==', userId)
         .where('used', '==', false)
@@ -48,7 +50,7 @@ export async function storeEmailVerificationCode(
     const verificationCode: EmailVerificationCode = {
         userId,
         userDocumentId,
-        email,
+        email: normalizedEmail,
         code,
         expiresAt,
         createdAt: moment().toDate(),

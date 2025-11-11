@@ -90,7 +90,7 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
     const now = moment().toDate();
     const user: Omit<User, '_id'> = {
         name: userData.name,
-        email: userData.email,
+        email: userData.email.trim().toLowerCase(),
         password: hashedPassword,
         userId,
         emailVerifiedAt: null,
@@ -101,6 +101,10 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
 
     if (userData.company) {
         (user as any).company = userData.company;
+    }
+
+    if (userData.timezone) {
+        (user as any).timezone = userData.timezone;
     }
 
     if ((userData as any).inviteId) {
@@ -136,7 +140,7 @@ export async function findUserByUserId(userId: string): Promise<User | null> {
  */
 export async function findUserByEmail(email: string): Promise<User | null> {
     const collection = getUsersCollection();
-    const snapshot = await collection.where('email', '==', email).limit(1).get();
+    const snapshot = await collection.where('email', '==', email.trim().toLowerCase()).limit(1).get();
 
     if (snapshot.empty) {
         return null;
@@ -294,6 +298,10 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
         updatedAt: moment().toDate(),
     };
 
+    if (updateData.email) {
+        updatedData.email = updateData.email.trim().toLowerCase();
+    }
+
     if (updateData.password) {
         updatedData.password = await hashPassword(updateData.password);
     }
@@ -426,6 +434,8 @@ export function generateDeletionCode(): string {
 export async function storeDeletionCode(email: string, userId: string, code: string): Promise<void> {
     const collection = getDeletionCodesCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Invalidate any existing codes for this user
     const existingSnapshot = await collection
         .where('userId', '==', userId)
@@ -440,7 +450,7 @@ export async function storeDeletionCode(email: string, userId: string, code: str
     // Create new deletion code
     const expiresAt = moment().add(CODE_EXPIRY_MINUTES, 'minutes').toDate();
     const deletionCode: Omit<AccountDeletionCode, '_id'> = {
-        email,
+        email: normalizedEmail,
         userId,
         code,
         expiresAt,

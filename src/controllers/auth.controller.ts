@@ -81,7 +81,7 @@ export const authenticate = async (req: Request, res: Response): Promise<void> =
         }
 
         // Find user by email
-        const user = await UsersService.findUserByEmail(email);
+        const user = await UsersService.findUserByEmail(email.trim().toLowerCase());
 
         if (!user) {
             res.status(401).json({
@@ -236,14 +236,16 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
             return;
         }
 
+        const normalizedEmail = email.trim().toLowerCase();
+
         // Check if user exists
-        const user = await UsersService.findUserByEmail(email);
+        const user = await UsersService.findUserByEmail(normalizedEmail);
 
         // Always return success message to prevent email enumeration
         // But only send email if user exists
         if (user) {
             const code = generateRecoveryCode();
-            await storeRecoveryCode(email, code);
+            await storeRecoveryCode(normalizedEmail, code);
 
             // Send email with recovery code
             const emailContent = `
@@ -259,7 +261,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
             `;
 
             await sendEmail(
-                [email],
+                [normalizedEmail],
                 'Password Recovery Code - KeepWatch',
                 emailContent
             );
@@ -371,7 +373,9 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const user = await UsersService.findUserByEmail(email);
+        const normalizedEmail = email.trim().toLowerCase();
+
+        const user = await UsersService.findUserByEmail(normalizedEmail);
 
         if (!user) {
             res.status(404).json({
@@ -380,7 +384,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const isValidCode = await validateRecoveryCode(email, code);
+        const isValidCode = await validateRecoveryCode(normalizedEmail, code);
 
         if (!isValidCode) {
             res.status(401).json({
@@ -569,7 +573,9 @@ export const resendVerificationEmail = async (req: Request, res: Response): Prom
             return;
         }
 
-        const user = await UsersService.findUserByEmail(email);
+        const normalizedEmail = email.trim().toLowerCase();
+
+        const user = await UsersService.findUserByEmail(normalizedEmail);
 
         if (!user) {
             res.json({
@@ -702,7 +708,9 @@ export const verifyTwoFactor = async (req: Request, res: Response): Promise<void
             return;
         }
 
-        const user = await UsersService.findUserByEmail(email);
+        const normalizedEmail = email.trim().toLowerCase();
+
+        const user = await UsersService.findUserByEmail(normalizedEmail);
 
         if (!user) {
             res.status(404).json({
@@ -711,7 +719,7 @@ export const verifyTwoFactor = async (req: Request, res: Response): Promise<void
             return;
         }
 
-        const validationResult = await validateTwoFactorCode(email, code);
+        const validationResult = await validateTwoFactorCode(normalizedEmail, code);
 
         if (!validationResult || validationResult.userId !== user.userId) {
             res.status(401).json({

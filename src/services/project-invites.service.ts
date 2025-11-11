@@ -66,7 +66,7 @@ export async function createProjectInvite(options: CreateProjectInviteOptions): 
         token,
         projectId: options.projectId,
         senderUserId: options.senderUserId,
-        recipientEmail: options.recipientEmail,
+        recipientEmail: options.recipientEmail.trim().toLowerCase(),
         recipientUserId: options.recipientUserId,
         recipientRole: options.recipientRole,
         expiresAt,
@@ -171,9 +171,11 @@ export async function deleteInvitesByRecipientAndProject(
         throw new Error('Firestore not connected');
     }
 
+    const normalizedEmail = recipientEmail.trim().toLowerCase();
+
     const snapshot = await collection
         .where('projectId', '==', projectId)
-        .where('recipientEmail', '==', recipientEmail)
+        .where('recipientEmail', '==', normalizedEmail)
         .get();
 
     if (snapshot.empty) {

@@ -40,9 +40,11 @@ export function generateRecoveryCode(): string {
 export async function storeRecoveryCode(email: string, code: string): Promise<void> {
     const collection = getRecoveryCodesCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Invalidate any existing codes for this email
     const existingSnapshot = await collection
-        .where('email', '==', email)
+        .where('email', '==', normalizedEmail)
         .where('used', '==', false)
         .get();
 
@@ -54,7 +56,7 @@ export async function storeRecoveryCode(email: string, code: string): Promise<vo
     // Create new recovery code
     const expiresAt = moment().add(CODE_EXPIRY_MINUTES, 'minutes').toDate();
     const recoveryCode: Omit<PasswordRecoveryCode, '_id'> = {
-        email,
+        email: normalizedEmail,
         code,
         expiresAt,
         createdAt: new Date(),
@@ -76,10 +78,12 @@ export async function storeRecoveryCode(email: string, code: string): Promise<vo
 export async function validateRecoveryCode(email: string, code: string): Promise<boolean> {
     const collection = getRecoveryCodesCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Query for the specific code (Firestore requires composite index for multiple where + orderBy)
     // Since we invalidate old codes, we should only have one unused code per email
     const snapshot = await collection
-        .where('email', '==', email)
+        .where('email', '==', normalizedEmail)
         .where('code', '==', code)
         .where('used', '==', false)
         .get();

@@ -76,7 +76,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
             }
 
             // Verify that the email matches the invite recipient email
-            if (userData.email.toLowerCase() !== invite.recipientEmail.toLowerCase()) {
+            if (userData.email.trim().toLowerCase() !== invite.recipientEmail.toLowerCase()) {
                 res.status(403).json({
                     error: 'Email does not match the invite recipient',
                 });
@@ -88,7 +88,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         }
 
         // Check if email already exists
-        if (await UsersService.emailExists(userData.email)) {
+        if (await UsersService.emailExists(userData.email.trim().toLowerCase())) {
             res.status(409).json({
                 error: 'User with this email already exists',
             });
@@ -228,6 +228,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
             ...userResponse,
             emailVerifiedAt: user.emailVerifiedAt ?? null,
             is2FARequired: user.is2FARequired ?? false,
+            timezone: user.timezone ?? null,
         };
 
         const subscriptionPlanEnrollment = await getSubscriptionPlanEnrollmentByUserId(user.userId);
@@ -398,8 +399,8 @@ export const updateCurrentUser = async (req: Request, res: Response): Promise<vo
         }
 
         // If email is being updated, check if new email already exists
-        if (updateData.email && updateData.email !== existingUser.email) {
-            if (await UsersService.emailExists(updateData.email)) {
+        if (updateData.email && updateData.email.trim().toLowerCase() !== existingUser.email) {
+            if (await UsersService.emailExists(updateData.email.trim().toLowerCase())) {
                 res.status(409).json({
                     error: 'User with this email already exists',
                 });

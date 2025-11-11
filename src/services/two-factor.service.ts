@@ -28,8 +28,10 @@ export function generateTwoFactorCode(): string {
 export async function storeTwoFactorCode(email: string, userId: string, code: string): Promise<void> {
     const collection = getTwoFactorCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const existingSnapshot = await collection
-        .where('email', '==', email)
+        .where('email', '==', normalizedEmail)
         .where('used', '==', false)
         .get();
 
@@ -40,7 +42,7 @@ export async function storeTwoFactorCode(email: string, userId: string, code: st
 
     const now = moment();
     const twoFactorCode: TwoFactorCode = {
-        email,
+        email: normalizedEmail,
         userId,
         code,
         createdAt: now.toDate(),
@@ -57,8 +59,10 @@ export async function storeTwoFactorCode(email: string, userId: string, code: st
 export async function validateTwoFactorCode(email: string, code: string): Promise<{ userId: string } | null> {
     const collection = getTwoFactorCollection();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const snapshot = await collection
-        .where('email', '==', email)
+        .where('email', '==', normalizedEmail)
         .where('code', '==', code)
         .where('used', '==', false)
         .get();

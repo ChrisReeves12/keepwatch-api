@@ -8,6 +8,7 @@ export interface User {
     password: string;
     userId: string; // Unique machine-readable identifier (slug)
     company?: string;
+    timezone?: string;
     emailVerifiedAt?: Date | null;
     is2FARequired?: boolean;
     createdAt: Date;
@@ -22,6 +23,7 @@ export interface CreateUserInput {
     email: string;
     password: string;
     company?: string;
+    timezone?: string;
     is2FARequired?: boolean;
 }
 
@@ -33,6 +35,7 @@ export interface UpdateUserInput {
     email?: string;
     password?: string;
     company?: string;
+    timezone?: string;
     emailVerifiedAt?: Date | null;
     is2FARequired?: boolean;
 }
