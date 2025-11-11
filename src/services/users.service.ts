@@ -103,6 +103,10 @@ export async function createUser(userData: CreateUserInput): Promise<User> {
         (user as any).company = userData.company;
     }
 
+    if ((userData as any).inviteId) {
+        (user as any).inviteId = (userData as any).inviteId;
+    }
+
     const docRef = await collection.add(user);
     const doc = await docRef.get();
 

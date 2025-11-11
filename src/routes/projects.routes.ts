@@ -25,7 +25,9 @@ router.delete('/:projectId/users/:userId', authenticate, ProjectsController.remo
 router.post('/:projectId/invite/send', authenticate, ProjectsController.sendUserInvite);
 // New public route without projectId
 router.get('/invite/:inviteId', ProjectsController.verifyProjectInvite);
-
+// Accept or reject invite (authentication required)
+router.put('/invite/:inviteId', authenticate, ProjectsController.respondToProjectInvite);
+// Get project details by invite (no authentication required)
 router.get('/invite/:inviteId/project-details', ProjectsController.getProjectByInviteDetails);
 
 // Alarm routes

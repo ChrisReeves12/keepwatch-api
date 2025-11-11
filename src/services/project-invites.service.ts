@@ -111,4 +111,80 @@ export async function verifyProjectInvite(
     return invite;
 }
 
+/**
+ * Update invite's recipientUserId
+ * @param inviteId - The invite document ID
+ * @param recipientUserId - The user's Firestore document ID
+ * @returns Updated invite or null if not found
+ */
+export async function updateInviteRecipientUserId(
+    inviteId: string,
+    recipientUserId: string
+): Promise<ProjectInvite | null> {
+    const collection = getProjectInvitesCollection();
+    const docRef = collection.doc(inviteId);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+        return null;
+    }
+
+    await docRef.update({
+        recipientUserId,
+    });
+
+    const updatedDoc = await docRef.get();
+    return toProjectInvite(updatedDoc);
+}
+
+/**
+ * Delete a project invite
+ * @param inviteId - The invite document ID
+ * @returns true if deleted, false if not found
+ */
+export async function deleteProjectInvite(inviteId: string): Promise<boolean> {
+    const collection = getProjectInvitesCollection();
+    const docRef = collection.doc(inviteId);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+        return false;
+    }
+
+    await docRef.delete();
+    return true;
+}
+
+/**
+ * Delete all invites for a given projectId and recipientEmail
+ * @param projectId - The project slug/identifier
+ * @param recipientEmail - The recipient's email (should be normalized to lowercase by caller)
+ * @returns number of deleted invites
+ */
+export async function deleteInvitesByRecipientAndProject(
+    projectId: string,
+    recipientEmail: string
+): Promise<number> {
+    const collection = getProjectInvitesCollection();
+    const db = getFirestore();
+    if (!db) {
+        throw new Error('Firestore not connected');
+    }
+
+    const snapshot = await collection
+        .where('projectId', '==', projectId)
+        .where('recipientEmail', '==', recipientEmail)
+        .get();
+
+    if (snapshot.empty) {
+        return 0;
+    }
+
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+
+    return snapshot.size;
+}
+
 

@@ -4,6 +4,7 @@ import { CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode } from '../services/email-verification.service';
 import { getSubscriptionPlanEnrollmentByUserId } from '../services/subscription.service';
+import * as ProjectInvitesService from '../services/project-invites.service';
 
 /**
  * @swagger
@@ -53,6 +54,7 @@ import { getSubscriptionPlanEnrollmentByUserId } from '../services/subscription.
 export const createUser = async (req: Request, res: Response): Promise<void> => {
     try {
         const userData: CreateUserInput = req.body;
+        const { inviteId, inviteToken } = req.body;
 
         // Validate required fields
         if (!userData.name || !userData.email || !userData.password) {
@@ -60,6 +62,29 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
                 error: 'Missing required fields: name, email, password',
             });
             return;
+        }
+
+        // If inviteId and inviteToken are provided, validate the invite
+        if (inviteId && inviteToken) {
+            const invite = await ProjectInvitesService.verifyProjectInvite(inviteId, inviteToken);
+
+            if (!invite) {
+                res.status(403).json({
+                    error: 'Invalid or expired invite',
+                });
+                return;
+            }
+
+            // Verify that the email matches the invite recipient email
+            if (userData.email.toLowerCase() !== invite.recipientEmail.toLowerCase()) {
+                res.status(403).json({
+                    error: 'Email does not match the invite recipient',
+                });
+                return;
+            }
+
+            // Store the inviteId in userData to be saved with the user
+            (userData as any).inviteId = inviteId;
         }
 
         // Check if email already exists
@@ -71,6 +96,26 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         }
 
         const user = await UsersService.createUser(userData);
+
+// If inviteId was provided, update the invite's recipientUserId
+if (inviteId && user._id) {
+    try {
+        await ProjectInvitesService.updateInviteRecipientUserId(inviteId, user._id);
+    } catch (error) {
+        console.error('Error updating invite recipientUserId:', error);
+        // Don't fail user creation if invite update fails
+    }
+}
+
+        // If inviteId was provided, update the invite's recipientUserId
+        if (inviteId && user._id) {
+            try {
+                await ProjectInvitesService.updateInviteRecipientUserId(inviteId, user._id);
+            } catch (inviteUpdateError) {
+                console.error('Error updating invite recipient user ID:', inviteUpdateError);
+                // Continue with user creation even if invite update fails
+            }
+        }
 
         // Remove password from response
         const { password, ...userResponse } = user;

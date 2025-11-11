@@ -1637,6 +1637,13 @@ export const sendUserInvite = async (req: Request, res: Response): Promise<void>
 
         const recipientRole = normalizedRoleInput as ProjectRole;
 
+        // Delete any existing invites for this recipient email and project before creating a new one
+        try {
+            await ProjectInvitesService.deleteInvitesByRecipientAndProject(project.projectId, normalizedEmail);
+        } catch (cleanupError) {
+            console.warn('Warning: Failed to cleanup existing invites before creating a new one:', cleanupError);
+        }
+
         const invite = await ProjectInvitesService.createProjectInvite({
             projectId: project.projectId,
             senderUserId: senderUser._id,
@@ -1771,6 +1778,177 @@ export const verifyProjectInvite = async (req: Request, res: Response): Promise<
         console.error('Error verifying project invite:', error);
         res.status(500).json({
             error: 'Failed to verify project invite',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/projects/invite/{inviteId}:
+ *   put:
+ *     summary: Accept or reject a project invite
+ *     description: Accept or reject a project invite. If accepted, the authenticated user will be added to the project. The user's email must match the invite recipient email.
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: inviteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The unique identifier of the invite
+ *       - in: query
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The invite verification token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - isAccepted
+ *             properties:
+ *               isAccepted:
+ *                 type: boolean
+ *                 description: Whether the invite is accepted (true) or rejected (false)
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: Invite response recorded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Project invite accepted successfully
+ *       400:
+ *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Invalid or expired invite, or email mismatch
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User or project not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const respondToProjectInvite = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { inviteId } = req.params;
+        const token = typeof req.query.token === 'string' ? req.query.token : null;
+        const { isAccepted } = req.body;
+
+        // Validate request body
+        if (typeof isAccepted !== 'boolean') {
+            res.status(400).json({
+                error: 'Missing or invalid required field: isAccepted (must be boolean)',
+            });
+            return;
+        }
+
+        if (!token) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Verify the invite (validates inviteId, token, and expiration)
+        const invite = await ProjectInvitesService.verifyProjectInvite(inviteId, token);
+
+        if (!invite) {
+            res.status(403).json({
+                error: 'Invalid or expired invite',
+            });
+            return;
+        }
+
+        // Validate that the current user's email matches the invite's recipient email
+        if (currentUser.email.toLowerCase() !== invite.recipientEmail.toLowerCase()) {
+            res.status(403).json({
+                error: 'This invite was sent to a different email address',
+            });
+            return;
+        }
+
+        await UsersService.updateUser(currentUser.userId, { inviteId: null } as any);
+
+        if (isAccepted) {
+            // User accepted the invite - add them to the project
+
+            const project = await ProjectsService.findProjectByProjectId(invite.projectId);
+
+            if (!project) {
+                res.status(404).json({
+                    error: 'Project not found',
+                });
+                return;
+            }
+
+            // Add the user to the project with the role from the invite
+            await ProjectsService.addUserToProject(invite.projectId, currentUser._id, invite.recipientRole);
+            await ProjectInvitesService.deleteProjectInvite(inviteId);
+
+            res.json({
+                message: 'Project invite accepted successfully',
+                projectId: invite.projectId
+            });
+        } else {
+            await ProjectInvitesService.deleteProjectInvite(inviteId);
+
+            res.json({
+                message: 'Project invite rejected',
+                projectId: invite.projectId
+            });
+        }
+    } catch (error: any) {
+        console.error('Error responding to project invite:', error);
+        res.status(500).json({
+            error: 'Failed to respond to project invite',
             details: error.message,
         });
     }

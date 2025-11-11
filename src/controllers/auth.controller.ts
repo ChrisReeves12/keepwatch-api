@@ -6,6 +6,7 @@ import { generateRecoveryCode, storeRecoveryCode, validateRecoveryCode } from '.
 import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode, validateEmailVerificationCode } from '../services/email-verification.service';
 import { generateTwoFactorCode, storeTwoFactorCode, validateTwoFactorCode } from '../services/two-factor.service';
+import * as ProjectInvitesService from '../services/project-invites.service';
 
 /**
  * @swagger
@@ -152,10 +153,23 @@ export const authenticate = async (req: Request, res: Response): Promise<void> =
             email: user.email,
         });
 
+        // Check if user has a pending invite
+        let inviteDetails = null;
+        if ((user as any).inviteId) {
+            const invite = await ProjectInvitesService.findProjectInviteById((user as any).inviteId);
+            if (invite) {
+                inviteDetails = {
+                    inviteId: invite._id,
+                    inviteToken: invite.token,
+                };
+            }
+        }
+
         res.json({
             message: 'Authentication successful',
             token,
             user: userPayload,
+            ...(inviteDetails && inviteDetails),
         });
     } catch (error: any) {
         console.error('Error authenticating user:', error);
@@ -718,10 +732,23 @@ export const verifyTwoFactor = async (req: Request, res: Response): Promise<void
             is2FARequired: user.is2FARequired ?? false,
         };
 
+        // Check if user has a pending invite
+        let inviteDetails = null;
+        if ((user as any).inviteId) {
+            const invite = await ProjectInvitesService.findProjectInviteById((user as any).inviteId);
+            if (invite) {
+                inviteDetails = {
+                    inviteId: invite._id,
+                    inviteToken: invite.token,
+                };
+            }
+        }
+
         res.json({
             message: 'Authentication successful',
             token,
             user: userPayload,
+            ...(inviteDetails && inviteDetails),
         });
     } catch (error: any) {
         console.error('Error verifying two-factor authentication code:', error);

@@ -1,11 +1,22 @@
-import { randomBytes, randomUUID } from 'crypto';
-import { Request } from 'express';
+import {randomBytes, randomUUID} from 'crypto';
+import {Request} from 'express';
 import * as ipaddr from 'ipaddr.js';
-import { getFirestore, serverTimestamp, arrayUnion, arrayRemove } from '../database/firestore.connection';
-import { Project, CreateProjectInput, UpdateProjectInput, ProjectUser, ProjectApiKey, UpdateApiKeyInput, ApiKeyConstraints, CreateAlarmInput, ProjectAlarm } from '../types/project.types';
-import { slugify } from '../utils/slugify.util';
-import { getCache, setCache, deleteCache } from './redis.service';
-import { deleteLogsByProjectId } from './logs.service';
+import {arrayRemove, arrayUnion, getFirestore} from '../database/firestore.connection';
+import {
+    ApiKeyConstraints,
+    CreateAlarmInput,
+    CreateProjectInput,
+    Project,
+    ProjectAlarm,
+    ProjectApiKey,
+    ProjectUser,
+    UpdateApiKeyInput,
+    UpdateProjectInput
+} from '../types/project.types';
+import {slugify} from '../utils/slugify.util';
+import {deleteCache, getCache, setCache} from './redis.service';
+import {deleteLogsByProjectId} from './logs.service';
+import {findUserById} from './users.service';
 
 const COLLECTION_NAME = 'projects';
 
@@ -602,6 +613,9 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
     // Generate unique projectId from name
     const projectId = await generateUniqueProjectId(projectData.name);
 
+    // Fetch owner data
+    const ownerData = await findUserById(creatorUserId);
+
     // Create project user with creator as admin
     const creatorUser: ProjectUser = {
         id: creatorUserId,
@@ -614,6 +628,8 @@ export async function createProject(projectData: CreateProjectInput, creatorUser
         description: projectData.description,
         projectId,
         ownerId: creatorUserId,
+        ownerName: ownerData?.name,
+        ownerEmail: ownerData?.email,
         users: [creatorUser],
         createdAt: now,
         updatedAt: now,
@@ -702,8 +718,8 @@ export async function getProjectsByUserId(userId: string): Promise<Project[]> {
         .orderBy('createdAt', 'desc')
         .get();
 
-    const memberSnapshot = await collection
-        .where('users', 'array-contains', { id: userId, role: 'member' })
+    const editorSnapshot = await collection
+        .where('users', 'array-contains', { id: userId, role: 'editor' })
         .orderBy('createdAt', 'desc')
         .get();
 
@@ -712,16 +728,14 @@ export async function getProjectsByUserId(userId: string): Promise<Project[]> {
         .orderBy('createdAt', 'desc')
         .get();
 
-    const allDocs = [...adminSnapshot.docs, ...memberSnapshot.docs, ...viewerSnapshot.docs];
+    const allDocs = [...adminSnapshot.docs, ...editorSnapshot.docs, ...viewerSnapshot.docs];
 
     // Remove duplicates (a user could be in a project with multiple roles, though unlikely with current logic)
     const uniqueDocs = allDocs.filter((doc, index, self) =>
         index === self.findIndex((d) => d.id === doc.id)
     );
 
-    const projects = uniqueDocs.map(doc => toProject(doc)!).filter(Boolean);
-
-    return projects;
+    return uniqueDocs.map(doc => toProject(doc)!).filter(Boolean);
 }
 
 /**
@@ -1140,6 +1154,61 @@ export async function updateApiKey(
     await deleteCache(cacheKey);
 
     return updatedApiKeys[apiKeyIndex];
+}
+
+/**
+ * Add a user to a project with a specific role
+ * @param projectId - The unique projectId identifier
+ * @param userId - Document ID of the user to add
+ * @param role - The role to assign ('viewer' | 'editor' | 'admin')
+ * @returns Updated project document or null if project not found
+ */
+export async function addUserToProject(
+    projectId: string,
+    userId: string,
+    role: 'viewer' | 'editor' | 'admin'
+): Promise<Project | null> {
+    const collection = getProjectsCollection();
+
+    // Find the project
+    const snapshot = await collection.where('projectId', '==', projectId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const project = toProject(snapshot.docs[0]);
+
+    if (!project) {
+        return null;
+    }
+
+    // Check if user already exists in the project
+    const userExists = project.users.some(u => u.id === userId);
+    if (userExists) {
+        // User already exists, don't add again
+        return project;
+    }
+
+    // Add the user with the specified role
+    const newUser: ProjectUser = {
+        id: userId,
+        role,
+    };
+
+    const updatedUsers = [...project.users, newUser];
+
+    await docRef.update({
+        users: updatedUsers,
+        updatedAt: new Date(),
+    });
+
+    // Invalidate cache after update
+    await deleteCache(`project:${projectId}`);
+
+    const updatedDoc = await docRef.get();
+    return toProject(updatedDoc);
 }
 
 /**
