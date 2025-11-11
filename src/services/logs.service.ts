@@ -364,7 +364,7 @@ async function deliverSlackAlarm(
 /**
  * Send alarm via webhook
  */
-async function deliverWebhookAlarm(
+export async function deliverWebhookAlarm(
     webhookUrl: string,
     alarmDetails: any
 ): Promise<void> {
@@ -374,17 +374,31 @@ async function deliverWebhookAlarm(
         alarm: alarmDetails,
     };
 
-    const response = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'KeepWatch-Alarm/1.0',
-        },
-        body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    if (!response.ok) {
-        throw new Error(`Webhook request failed with status ${response.status}`);
+    try {
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'KeepWatch-Alarm/1.0',
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error(`Webhook request failed with status ${response.status}`);
+        }
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error('Webhook request timed out after 6 seconds');
+        }
+        throw error;
     }
 }
 

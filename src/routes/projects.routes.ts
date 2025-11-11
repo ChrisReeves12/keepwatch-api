@@ -36,6 +36,7 @@ router.post('/:projectId/alarms', authenticate, ProjectsController.createProject
 router.put('/:projectId/alarms/:alarmId', authenticate, ProjectsController.updateProjectAlarm);
 router.delete('/:projectId/alarms/:alarmId', authenticate, ProjectsController.deleteProjectAlarm);
 router.delete('/:projectId/alarms', authenticate, ProjectsController.deleteProjectAlarm);
+router.post('/:projectId/alarms/test-webhook', authenticate, ProjectsController.sendTestWebhookAlarm);
 
 export default router;
 

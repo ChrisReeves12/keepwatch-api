@@ -6,6 +6,7 @@ import validator from 'validator';
 import * as ProjectInvitesService from '../services/project-invites.service';
 import { sendEmail } from '../services/mail.service';
 import moment from 'moment';
+import { deliverWebhookAlarm } from '../services/logs.service';
 
 const MAX_ALARM_CATEGORIES = 10;
 const PROJECT_ROLE_VALUES = ['viewer', 'editor', 'admin'] as const;
@@ -149,7 +150,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
 
         if (typeof projectLimit === 'number') {
             const currentProjectCount = await ProjectsService.countProjectsByOwnerId(creatorUser._id);
-            
+
             if (currentProjectCount >= projectLimit) {
                 res.status(403).json({
                     error: 'Project limit exceeded',
@@ -2205,6 +2206,166 @@ export const listProjectAlarms = async (req: Request, res: Response): Promise<vo
         });
     }
 };
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/alarms/test-webhook:
+ *   post:
+ *     summary: Send a test webhook alarm
+ *     description: Send a test webhook alarm to verify webhook configuration. User must have access to the project.
+ *     tags: [Alarms]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - webhookUrl
+ *             properties:
+ *               webhookUrl:
+ *                 type: string
+ *                 format: uri
+ *                 description: The webhook URL to send the test alarm to
+ *                 example: https://example.com/webhook
+ *     responses:
+ *       200:
+ *         description: Test webhook sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Test webhook sent successfully
+ *       400:
+ *         description: Missing required field
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const sendTestWebhookAlarm = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { webhookUrl } = req.body;
+        const { projectId } = req.params;
+
+        if (!webhookUrl) {
+            res.status(400).json({
+                error: 'Missing required field: webhookUrl',
+            });
+            return;
+        }
+
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        const user = await UsersService.findUserByUserId(req.user.userId);
+        if (!user || !user._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const hasAccess = project.users.some(pu => pu.id === user._id);
+        if (!hasAccess) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        const testLogId = 'test-log-' + Date.now();
+
+        const alarmDetails = {
+            logId: testLogId,
+            projectName: project.name,
+            projectId: project.projectId,
+            level: 'ERROR',
+            environment: 'production',
+            category: 'test',
+            logType: 'application',
+            message: 'This is a test alarm from KeepWatch',
+            request: {
+                url: 'https://example.com/api/test',
+                method: 'GET',
+                ip: '192.168.1.1',
+                userAgent: 'Mozilla/5.0 (Test Browser)',
+            },
+            requestLines: [
+                { key: 'url', value: 'https://example.com/api/test' },
+                { key: 'method', value: 'GET' },
+                { key: 'ip', value: '192.168.1.1' },
+                { key: 'userAgent', value: 'Mozilla/5.0 (Test Browser)' },
+            ],
+            timestamp: moment().utc().format('MMMM D, YYYY  h:mm:ss A') + ' (UTC)',
+            hostname: 'test-server-01',
+            stackTrace: 'Error: Test error\n    at testFunction (test.js:10:15)\n    at main (test.js:20:5)',
+            webUrl: `${process.env.WEB_FRONTEND_URL}/project/${projectId}/logs/${testLogId}`,
+        };
+
+        await deliverWebhookAlarm(webhookUrl, alarmDetails);
+
+        res.status(200).json({
+            message: 'Test webhook alarm sent successfully',
+            webhookUrl,
+        });
+
+    } catch (error: any) {
+        console.error('Error sending test webhook alarm:', error);
+        res.status(500).json({
+            error: 'Failed to send test webhook alarm',
+            details: error.message,
+        });
+    }
+}
 
 /**
  * @swagger
