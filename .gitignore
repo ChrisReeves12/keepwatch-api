@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 
+firebase-data
+
 # Build output
 dist/
 

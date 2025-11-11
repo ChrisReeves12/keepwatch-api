@@ -3,7 +3,7 @@ import * as UsersService from '../services/users.service';
 import { CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode } from '../services/email-verification.service';
-import { getSubscriptionPlanEnrollmentByUserId } from '../services/subscription.service';
+import { getSubscriptionPlanEnrollmentByUserId, findSubscriptionPlanByMachineName } from '../services/subscription.service';
 import * as ProjectInvitesService from '../services/project-invites.service';
 
 /**
@@ -240,6 +240,77 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
         console.error('Error fetching user:', error);
         res.status(500).json({
             error: 'Failed to fetch user',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/users/me/subscription:
+ *   get:
+ *     summary: Get current user's subscription enrollment
+ *     description: Retrieve the full subscription plan enrollment details for the currently authenticated user. Returns null if the user is on a free plan.
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Subscription enrollment retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 subscriptionPlanEnrollment:
+ *                   oneOf:
+ *                     - $ref: '#/components/schemas/SubscriptionPlanEnrollment'
+ *                     - type: 'null'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getCurrentUserSubscription = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const userId = req.user.userId;
+        const subscriptionPlanEnrollment = await getSubscriptionPlanEnrollmentByUserId(userId);
+
+        if (!subscriptionPlanEnrollment) {
+            res.json({
+                subscriptionPlanEnrollment: null,
+            });
+            return;
+        }
+
+        // Fetch the full subscription plan details
+        const subscriptionPlan = await findSubscriptionPlanByMachineName(subscriptionPlanEnrollment.subscriptionPlan);
+
+        res.json({
+            subscriptionPlanEnrollment: {
+                ...subscriptionPlanEnrollment,
+                subscriptionPlanDetails: subscriptionPlan,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error fetching subscription enrollment:', error);
+        res.status(500).json({
+            error: 'Failed to fetch subscription enrollment',
             details: error.message,
         });
     }
