@@ -234,7 +234,6 @@ export async function getUserCreatedAtAndEnrollment(userId: string): Promise<Use
         };
 
         await setCache(cacheKey, cachePayload, 10 * 60); // 10 minutes in seconds
-        console.log(`Successfully cached user usage metadata for: ${userId}`);
     } catch (error) {
         console.error('❌ Failed to cache user usage metadata:', error);
     }

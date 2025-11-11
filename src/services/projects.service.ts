@@ -684,7 +684,6 @@ export async function findCachedProjectById(projectId: string): Promise<Project 
         try {
             console.log(`Caching project: ${projectId}`);
             await setCache(cacheKey, project, 300); // 5 minutes TTL
-            console.log(`Successfully cached project: ${projectId}`);
         } catch (error) {
             console.error('❌ Failed to cache project:', error);
         }
