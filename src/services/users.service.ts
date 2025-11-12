@@ -1,4 +1,4 @@
-import { getFirestore, toDate } from '../database/firestore.connection';
+import { getFirestore, toDate, deleteField } from '../database/firestore.connection';
 import { User, CreateUserInput, UpdateUserInput } from '../types/user.types';
 import { hashPassword } from './crypt.service';
 import { slugify } from '../utils/slugify.util';
@@ -527,7 +527,7 @@ export async function unlinkGoogleAccount(userId: string): Promise<User | null> 
 
     // Use FieldValue.delete() to remove the googleId field
     await docRef.update({
-        googleId: db.FieldValue.delete() as any,
+        googleId: deleteField(),
         updatedAt: moment().toDate(),
     });
 
