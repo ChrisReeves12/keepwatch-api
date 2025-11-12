@@ -1,9 +1,11 @@
 import 'dotenv/config';
 import { CloudEvent } from '@google-cloud/functions-framework';
+import { PubSub } from '@google-cloud/pubsub';
 import { CreateLogInput } from '../types/log.types';
 import { connectToFirestore } from '../database/firestore.connection';
 import { createLogsTypesenseCollection } from '../services/typesense.service';
 import { storeLogMessage } from '../services/logs.service';
+import { LOG_ALARM_TOPIC } from '../constants';
 
 // Initialize connections on cold start
 let isInitialized = false;
@@ -51,7 +53,21 @@ export async function processLogIngestion(cloudEvent: CloudEvent<PubSubMessage>)
         const logData: CreateLogInput = JSON.parse(messageData);
 
         // Use shared processing logic
-        await storeLogMessage(logData);
+        const log = await storeLogMessage(logData);
+
+        // After storing the log, publish to the alarm topic with logData and logId
+        const pubSubClient = new PubSub();
+        const alarmTopic = pubSubClient.topic(LOG_ALARM_TOPIC);
+        const alarmPayload = {
+            logData,
+            logId: log._id,
+        };
+
+        await alarmTopic.publishMessage({
+            json: alarmPayload,
+        });
+
+        console.log(`✅ Published alarm message for log: ${log._id}`);
     } catch (error: any) {
         console.error('❌ Error processing log:', error.message);
         // Throwing an error will cause the function to retry (with exponential backoff)

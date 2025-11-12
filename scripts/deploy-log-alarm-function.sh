@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Deploy the log ingestion Cloud Function to Google Cloud
+# Deploy the log alarm Cloud Function to Google Cloud
 # This script deploys a Cloud Function (2nd gen) that is triggered by Pub/Sub messages
 
 set -e  # Exit on error
@@ -19,11 +19,11 @@ trap cleanup EXIT
 GOOGLE_CLOUD_PROJECT="keep-watch-1"
 
 # Configuration
-FUNCTION_NAME="log-ingestion-processor"
+FUNCTION_NAME="log-alarm-processor"
 REGION="us-central1"
 RUNTIME="nodejs20"
-ENTRY_POINT="processLogIngestion"
-TOPIC_NAME="log-ingestion"
+ENTRY_POINT="processLogAlarmFunction"
+TOPIC_NAME="log-alarm"
 SOURCE_DIR="."
 SERVICE_ACCOUNT="keepwatch-api-sa@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com"
 
@@ -62,8 +62,8 @@ gcloud functions deploy "$FUNCTION_NAME" \
     --entry-point="$ENTRY_POINT" \
     --trigger-topic="$TOPIC_NAME" \
     --service-account="$SERVICE_ACCOUNT" \
-    --set-secrets="TYPESENSE_API_KEY=TYPESENSE_API_KEY:latest,TYPESENSE_HOST=TYPESENSE_HOST:latest,REDIS_HOST=REDIS_HOST:latest" \
-    --set-env-vars="WEB_FRONTEND_URL=https://keepwatch.io,GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT},TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379" \
+    --set-secrets="REDIS_HOST=REDIS_HOST:latest,MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,MAILGUN_SENDER_EMAIL=MAILGUN_SENDER_EMAIL:latest" \
+    --set-env-vars="WEB_FRONTEND_URL=https://keepwatch.io,GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT},REDIS_PORT=6379" \
     --vpc-connector="keepwatch-connector" \
     --memory="512Mi" \
     --timeout="60s" \
@@ -73,11 +73,10 @@ gcloud functions deploy "$FUNCTION_NAME" \
     --retry
 
 echo ""
-echo "✅ Log Worker Deployment complete!"
+echo "✅ Log Alarm Function Deployment complete!"
 echo ""
 echo "To view logs, run:"
 echo "  gcloud functions logs read $FUNCTION_NAME --region=$REGION --gen2 --limit=50"
 echo ""
 echo "To test the function, publish a message to the topic:"
-echo "  gcloud pubsub topics publish $TOPIC_NAME --message='{\"level\":\"info\",\"environment\":\"test\",\"projectId\":\"your-project\",\"message\":\"Test message\"}'"
-
+echo "  gcloud pubsub topics publish $TOPIC_NAME --message='{\"logData\":{\"level\":\"error\",\"message\":\"Test error\"},\"logId\":\"test-log-id\"}'"

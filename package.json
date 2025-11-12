@@ -2,7 +2,7 @@
   "name": "keepwatch-api",
   "version": "1.0.0",
   "description": "Node.js Express API with TypeScript",
-  "main": "dist/index.js",
+  "main": "dist/functions/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev-debug": "tsx watch --inspect=0.0.0.0:9229 src/index.ts",
