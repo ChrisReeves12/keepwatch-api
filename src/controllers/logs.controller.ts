@@ -1261,6 +1261,155 @@ export const getCategoriesByProjectAndLogType = async (req: Request, res: Respon
 
 /**
  * @swagger
+ * /api/v1/logs/{projectId}/{logType}/hostnames:
+ *   get:
+ *     summary: Get all unique hostname values for a project and log type
+ *     description: Returns all unique hostname values with their counts for a specific project and log type using Typesense facet search. Requires JWT authentication via Bearer token. The user must be a member of the project.
+ *     tags: [Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Project slug identifier
+ *       - in: path
+ *         name: logType
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [application, system]
+ *         description: Log type to filter by (application or system)
+ *     responses:
+ *       200:
+ *         description: Hostnames retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 hostnames:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       value:
+ *                         type: string
+ *                         example: api-server-01
+ *                       count:
+ *                         type: integer
+ *                         example: 342
+ *       400:
+ *         description: Invalid logType parameter
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - User does not have access to this project
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Project or user not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const getHostnamesByProjectAndLogType = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Verify JWT authentication
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get projectId and logType from path params
+        const { projectId, logType } = req.params;
+        if (!projectId) {
+            res.status(400).json({
+                error: 'Missing required path parameter: projectId',
+            });
+            return;
+        }
+
+        if (!logType) {
+            res.status(400).json({
+                error: 'Missing required path parameter: logType',
+            });
+            return;
+        }
+
+        // Validate logType
+        if (logType !== 'application' && logType !== 'system') {
+            res.status(400).json({
+                error: 'logType must be either "application" or "system"',
+            });
+            return;
+        }
+
+        // Verify project exists
+        const project = await ProjectsService.findProjectByProjectId(projectId);
+        if (!project) {
+            res.status(404).json({
+                error: 'Project not found',
+            });
+            return;
+        }
+
+        // Get the current user
+        const currentUser = await UsersService.findUserByUserId(req.user.userId);
+        if (!currentUser || !currentUser._id) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if current user is a member of the project (any role)
+        const currentProjectUser = project.users.find(pu => pu.id === currentUser._id);
+        if (!currentProjectUser) {
+            res.status(403).json({
+                error: 'Forbidden: You do not have access to this project',
+            });
+            return;
+        }
+
+        // Get hostnames using facet search
+        const hostnames = await LogsService.getHostnamesByProjectAndLogType(projectId, logType);
+
+        res.json({
+            hostnames,
+        });
+    } catch (error: any) {
+        console.error('Error fetching hostnames:', error);
+        res.status(500).json({
+            error: 'Failed to fetch hostnames',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
  * /api/v1/logs/{projectId}:
  *   delete:
  *     summary: Purge logs for a project

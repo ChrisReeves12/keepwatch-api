@@ -1269,3 +1269,41 @@ export async function getCategoriesByProjectAndLogType(
         count: count.count,
     }));
 }
+
+/**
+ * Get all unique hostname values for a project and log type using Typesense facet search
+ * @param projectId - The projectId to get hostnames for
+ * @param logType - The log type to filter by ("application" or "system")
+ * @returns Array of unique hostname names with their counts
+ */
+export async function getHostnamesByProjectAndLogType(
+    projectId: string,
+    logType: string
+): Promise<Array<{ value: string; count: number }>> {
+    const typesenseClient = getTypesenseClient();
+
+    const filterBy = `projectId:${projectId} && logType:${logType}`;
+
+    const searchResults = await typesenseClient
+        .collections('logs')
+        .documents()
+        .search({
+            q: '*',
+            query_by: 'message',
+            filter_by: filterBy,
+            facet_by: 'hostname',
+            per_page: 0,
+        });
+
+    const facetCounts = searchResults.facet_counts || [];
+    const hostnameFacet = facetCounts.find((facet: any) => facet.field_name === 'hostname');
+
+    if (!hostnameFacet || !hostnameFacet.counts) {
+        return [];
+    }
+
+    return hostnameFacet.counts.map((count: any) => ({
+        value: count.value,
+        count: count.count,
+    }));
+}
