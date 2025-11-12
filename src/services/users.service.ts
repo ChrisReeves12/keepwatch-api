@@ -308,6 +308,23 @@ export async function updateUser(userId: string, updateData: UpdateUserInput): P
 
     await docRef.update(updatedData);
 
+    // If the user's name was updated, update ownerName on all projects they own
+    if (updateData.name) {
+        const db = getFirestore();
+        if (db) {
+            const projectsCollection = db.collection('projects');
+            const projectsSnapshot = await projectsCollection.where('ownerId', '==', docRef.id).get();
+
+            if (!projectsSnapshot.empty) {
+                const batch = db.batch();
+                projectsSnapshot.docs.forEach(doc => {
+                    batch.update(doc.ref, { ownerName: updateData.name });
+                });
+                await batch.commit();
+            }
+        }
+    }
+
     const updatedDoc = await docRef.get();
     return toUser(updatedDoc);
 }
