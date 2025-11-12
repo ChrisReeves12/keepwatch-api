@@ -11,6 +11,8 @@ export interface User {
     timezone?: string;
     emailVerifiedAt?: Date | null;
     is2FARequired?: boolean;
+    googleId?: string; // Google OAuth sub ID
+    profilePicture?: string; // Profile picture URL (from Google)
     createdAt: Date;
     updatedAt: Date;
 }
@@ -25,6 +27,8 @@ export interface CreateUserInput {
     company?: string;
     timezone?: string;
     is2FARequired?: boolean;
+    googleId?: string;
+    profilePicture?: string;
 }
 
 /**

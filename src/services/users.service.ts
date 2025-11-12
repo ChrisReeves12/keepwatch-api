@@ -409,6 +409,132 @@ export async function emailExists(email: string): Promise<boolean> {
     return user !== null;
 }
 
+/**
+ * Find a user by Google ID
+ * @param googleId - Google OAuth sub ID
+ * @returns User document or null
+ */
+export async function findUserByGoogleId(googleId: string): Promise<User | null> {
+    const collection = getUsersCollection();
+    const snapshot = await collection.where('googleId', '==', googleId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    return toUser(snapshot.docs[0]);
+}
+
+/**
+ * Create a new user from Google OAuth
+ * @param googleData - Google user data
+ * @returns Created user document
+ */
+export async function createGoogleUser(googleData: {
+    googleId: string;
+    email: string;
+    name: string;
+    profilePicture?: string;
+    timezone?: string;
+}): Promise<User> {
+    const collection = getUsersCollection();
+
+    // Check if email already exists
+    if (await emailExists(googleData.email)) {
+        throw new Error('Email already exists');
+    }
+
+    const userId = await generateUniqueUserId(googleData.name);
+
+    const now = moment().toDate();
+    const user: Omit<User, '_id'> = {
+        name: googleData.name,
+        email: googleData.email.trim().toLowerCase(),
+        password: '', // No password for Google OAuth users
+        userId,
+        googleId: googleData.googleId,
+        profilePicture: googleData.profilePicture,
+        emailVerifiedAt: now, // Google has already verified the email
+        is2FARequired: false,
+        createdAt: now,
+        updatedAt: now,
+    };
+
+    if (googleData.timezone) {
+        (user as any).timezone = googleData.timezone;
+    }
+
+    const docRef = await collection.add(user);
+    const doc = await docRef.get();
+
+    return toUser(doc)!;
+}
+
+/**
+ * Link a Google account to an existing user
+ * @param userId - The unique userId identifier
+ * @param googleId - Google OAuth sub ID
+ * @param profilePicture - Optional profile picture URL
+ * @returns Updated user document or null
+ */
+export async function linkGoogleAccount(
+    userId: string,
+    googleId: string,
+    profilePicture?: string
+): Promise<User | null> {
+    const collection = getUsersCollection();
+    const snapshot = await collection.where('userId', '==', userId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const updateData: any = {
+        googleId,
+        updatedAt: moment().toDate(),
+    };
+
+    if (profilePicture) {
+        updateData.profilePicture = profilePicture;
+    }
+
+    await docRef.update(updateData);
+
+    const updatedDoc = await docRef.get();
+    return toUser(updatedDoc);
+}
+
+/**
+ * Unlink a Google account from an existing user
+ * @param userId - The unique userId identifier
+ * @returns Updated user document or null
+ */
+export async function unlinkGoogleAccount(userId: string): Promise<User | null> {
+    const collection = getUsersCollection();
+    const snapshot = await collection.where('userId', '==', userId).limit(1).get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const docRef = snapshot.docs[0].ref;
+    const db = getFirestore();
+
+    if (!db) {
+        throw new Error('Firestore not connected');
+    }
+
+    // Use FieldValue.delete() to remove the googleId field
+    await docRef.update({
+        googleId: db.FieldValue.delete() as any,
+        updatedAt: moment().toDate(),
+    });
+
+    const updatedDoc = await docRef.get();
+    return toUser(updatedDoc);
+}
+
 // ============================================================================
 // Account Deletion Verification Functions
 // ============================================================================

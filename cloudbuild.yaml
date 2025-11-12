@@ -32,8 +32,8 @@ steps:
       - '--allow-unauthenticated' # Use --no-allow-unauthenticated for private services
       - '--service-account=keepwatch-api-sa@${PROJECT_ID}.iam.gserviceaccount.com'
       - '--vpc-connector=keepwatch-connector'
-      - '--update-secrets=TYPESENSE_API_KEY=TYPESENSE_API_KEY:latest,TYPESENSE_HOST=TYPESENSE_HOST:latest,REDIS_HOST=REDIS_HOST:latest,JWT_SECRET=JWT_SECRET:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,MAILGUN_SENDER_EMAIL=MAILGUN_SENDER_EMAIL:latest,MAILGUN_API_KEY=MAILGUN_API_KEY:latest'
-      - '--set-env-vars=WEB_FRONTEND_URL=https://keepwatch.io,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379,JWT_EXPIRY=30d'
+      - '--update-secrets=GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,TYPESENSE_API_KEY=TYPESENSE_API_KEY:latest,TYPESENSE_HOST=TYPESENSE_HOST:latest,REDIS_HOST=REDIS_HOST:latest,JWT_SECRET=JWT_SECRET:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,MAILGUN_SENDER_EMAIL=MAILGUN_SENDER_EMAIL:latest,MAILGUN_API_KEY=MAILGUN_API_KEY:latest'
+      - '--set-env-vars=GOOGLE_REDIRECT_URI=https://keepwatch.io/auth/google/callback,WEB_FRONTEND_URL=https://keepwatch.io,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TYPESENSE_PORT=443,TYPESENSE_PROTOCOL=https,REDIS_PORT=6379,JWT_EXPIRY=30d'
 
 substitutions:
   _SERVICE_NAME: 'keepwatch-api'

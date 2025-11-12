@@ -7,6 +7,7 @@ import { sendEmail } from '../services/mail.service';
 import { generateEmailVerificationCode, storeEmailVerificationCode, validateEmailVerificationCode } from '../services/email-verification.service';
 import { generateTwoFactorCode, storeTwoFactorCode, validateTwoFactorCode } from '../services/two-factor.service';
 import * as ProjectInvitesService from '../services/project-invites.service';
+import { verifyGoogleToken } from '../services/google-auth.service';
 
 /**
  * @swagger
@@ -762,6 +763,446 @@ export const verifyTwoFactor = async (req: Request, res: Response): Promise<void
         console.error('Error verifying two-factor authentication code:', error);
         res.status(500).json({
             error: 'Failed to verify two-factor authentication code',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/google:
+ *   post:
+ *     summary: Authenticate with Google OAuth
+ *     description: Authenticate a user using Google ID token. Creates a new user account if one doesn't exist.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - googleIdToken
+ *             properties:
+ *               googleIdToken:
+ *                 type: string
+ *                 description: Google ID token from OAuth flow
+ *                 example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjI3M...
+ *               timezone:
+ *                 type: string
+ *                 description: User's timezone (optional)
+ *                 example: America/New_York
+ *     responses:
+ *       200:
+ *         description: Authentication successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                   description: JWT token for authenticated requests
+ *                 userId:
+ *                   type: string
+ *                   description: User's unique identifier
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 isNewUser:
+ *                   type: boolean
+ *                   description: true if this was the user's first sign up
+ *       400:
+ *         description: Missing or invalid Google token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Email not verified with Google
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const googleAuth = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { googleIdToken, timezone } = req.body;
+
+        // Validate required fields
+        if (!googleIdToken) {
+            res.status(400).json({
+                error: 'Missing required field: googleIdToken',
+            });
+            return;
+        }
+
+        // Verify the Google token
+        const googlePayload = await verifyGoogleToken(googleIdToken);
+
+        if (!googlePayload) {
+            res.status(400).json({
+                error: 'Invalid Google token',
+            });
+            return;
+        }
+
+        // Check if email is verified by Google
+        if (!googlePayload.email_verified) {
+            res.status(401).json({
+                error: 'Email not verified with Google',
+            });
+            return;
+        }
+
+        const normalizedEmail = googlePayload.email.trim().toLowerCase();
+        let user = await UsersService.findUserByEmail(normalizedEmail);
+        let isNewUser = false;
+
+        if (user) {
+            // User exists - link Google account if not already linked
+            if (!user.googleId) {
+                user = await UsersService.linkGoogleAccount(
+                    user.userId,
+                    googlePayload.sub,
+                    googlePayload.picture
+                );
+            }
+        } else {
+            // User doesn't exist - create new user
+            try {
+                user = await UsersService.createGoogleUser({
+                    googleId: googlePayload.sub,
+                    email: normalizedEmail,
+                    name: googlePayload.name,
+                    profilePicture: googlePayload.picture,
+                    timezone: timezone || 'UTC',
+                });
+                isNewUser = true;
+            } catch (error: any) {
+                if (error.message === 'Email already exists') {
+                    // Race condition - user was created between check and creation
+                    user = await UsersService.findUserByEmail(normalizedEmail);
+                    if (user && !user.googleId) {
+                        user = await UsersService.linkGoogleAccount(
+                            user.userId,
+                            googlePayload.sub,
+                            googlePayload.picture
+                        );
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        if (!user) {
+            res.status(500).json({
+                error: 'Failed to create or retrieve user',
+            });
+            return;
+        }
+
+        // Generate JWT token
+        const token = createToken({
+            userId: user.userId,
+            email: user.email,
+        });
+
+        // Remove password from response
+        const { password: _, ...userResponse } = user;
+        const userPayload = {
+            ...userResponse,
+            emailVerifiedAt: user.emailVerifiedAt ?? null,
+            is2FARequired: user.is2FARequired ?? false,
+        };
+
+        res.json({
+            token,
+            userId: user.userId,
+            user: userPayload,
+            isNewUser,
+        });
+    } catch (error: any) {
+        console.error('Error authenticating with Google:', error);
+        res.status(500).json({
+            error: 'Failed to authenticate with Google',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/google/link:
+ *   post:
+ *     summary: Link Google account to existing KeepWatch account
+ *     description: Links a Google OAuth account to an authenticated KeepWatch user. Requires authentication via Bearer token.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - googleIdToken
+ *             properties:
+ *               googleIdToken:
+ *                 type: string
+ *                 description: Google ID token from OAuth flow
+ *                 example: eyJhbGciOiJSUzI1NiIsImtpZCI6IjI3M...
+ *     responses:
+ *       200:
+ *         description: Google account linked successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Google account linked successfully
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     googleLinked:
+ *                       type: boolean
+ *       400:
+ *         description: Invalid Google token or email mismatch
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       409:
+ *         description: Google account already linked to another account
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const linkGoogleAccount = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // User is authenticated via middleware, user info is in req.user
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        const { googleIdToken } = req.body;
+
+        // Validate required fields
+        if (!googleIdToken) {
+            res.status(400).json({
+                error: 'Missing required field: googleIdToken',
+            });
+            return;
+        }
+
+        // Verify the Google token
+        const googlePayload = await verifyGoogleToken(googleIdToken);
+
+        if (!googlePayload) {
+            res.status(400).json({
+                error: 'Invalid Google token',
+            });
+            return;
+        }
+
+        // Get the authenticated user
+        const user = await UsersService.findUserByUserId(req.user.userId);
+
+        if (!user) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check that Google email matches KeepWatch account email
+        const normalizedGoogleEmail = googlePayload.email.trim().toLowerCase();
+        const normalizedUserEmail = user.email.trim().toLowerCase();
+
+        if (normalizedGoogleEmail !== normalizedUserEmail) {
+            res.status(400).json({
+                error: 'Email mismatch. Google email must match KeepWatch account email.',
+            });
+            return;
+        }
+
+        // Check if this Google account is already linked to another user
+        const existingGoogleUser = await UsersService.findUserByGoogleId(googlePayload.sub);
+
+        if (existingGoogleUser && existingGoogleUser.userId !== user.userId) {
+            res.status(409).json({
+                error: 'This Google account is already linked to another KeepWatch account.',
+            });
+            return;
+        }
+
+        // Check if user already has a Google account linked
+        if (user.googleId) {
+            res.status(400).json({
+                error: 'A Google account is already linked to this KeepWatch account.',
+            });
+            return;
+        }
+
+        // Link the Google account
+        const updatedUser = await UsersService.linkGoogleAccount(
+            user.userId,
+            googlePayload.sub,
+            googlePayload.picture
+        );
+
+        if (!updatedUser) {
+            res.status(500).json({
+                error: 'Failed to link Google account',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'Google account linked successfully',
+            user: {
+                id: updatedUser.userId,
+                email: updatedUser.email,
+                googleLinked: true,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error linking Google account:', error);
+        res.status(500).json({
+            error: 'Failed to link Google account',
+            details: error.message,
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/google/unlink:
+ *   delete:
+ *     summary: Unlink Google account from KeepWatch account
+ *     description: Removes the Google OAuth link from an authenticated KeepWatch user. User must have a password set to prevent account lockout.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Google account unlinked successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Google account unlinked successfully
+ *       400:
+ *         description: Cannot unlink - no password set or no Google account linked
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export const unlinkGoogleAccount = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // User is authenticated via middleware, user info is in req.user
+        if (!req.user) {
+            res.status(401).json({
+                error: 'Authentication required',
+            });
+            return;
+        }
+
+        // Get the authenticated user
+        const user = await UsersService.findUserByUserId(req.user.userId);
+
+        if (!user) {
+            res.status(404).json({
+                error: 'User not found',
+            });
+            return;
+        }
+
+        // Check if user has a Google account linked
+        if (!user.googleId) {
+            res.status(400).json({
+                error: 'No Google account is linked to this KeepWatch account.',
+            });
+            return;
+        }
+
+        // Check if user has a password set (prevent lockout)
+        // Empty string or no password means they can only login via Google
+        if (!user.password || user.password === '') {
+            res.status(400).json({
+                error: 'Cannot unlink Google account. Please set a password first.',
+            });
+            return;
+        }
+
+        // Unlink the Google account
+        const updatedUser = await UsersService.unlinkGoogleAccount(user.userId);
+
+        if (!updatedUser) {
+            res.status(500).json({
+                error: 'Failed to unlink Google account',
+            });
+            return;
+        }
+
+        res.json({
+            message: 'Google account unlinked successfully',
+        });
+    } catch (error: any) {
+        console.error('Error unlinking Google account:', error);
+        res.status(500).json({
+            error: 'Failed to unlink Google account',
             details: error.message,
         });
     }
