@@ -73,7 +73,7 @@ gcloud functions deploy "$FUNCTION_NAME" \
     --retry
 
 echo ""
-echo "✅ Deployment complete!"
+echo "✅ Log Worker Deployment complete!"
 echo ""
 echo "To view logs, run:"
 echo "  gcloud functions logs read $FUNCTION_NAME --region=$REGION --gen2 --limit=50"
